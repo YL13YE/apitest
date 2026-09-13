@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apitest · AI API 测速</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="alternate icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/favicon-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f3f2ed;--surface:#fbfaf7;--surface-2:#efede6;--border:#dcd9cf;--border-2:#c4c0b3;
+  --text:#1d1c19;--text-2:#625f56;--text-3:#928e83;--ink:#1d1c19;--ink-text:#fbfaf7;
+  --accent:#0f6e56;--accent-soft:#e2efe9;
+  --green:#1a7f37;--amber:#9a6700;--red:#b42318;--blue:#175cd3;
+  --green-soft:#e4f2e8;--amber-soft:#f7efd8;--red-soft:#f9e3e0;--blue-soft:#e2ecfa;
+  --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,"Noto Sans SC",sans-serif;
+  --r:3px;
+}
+html[data-theme=dark]{
+  --bg:#141513;--surface:#1b1c1a;--surface-2:#22231f;--border:#2f302b;--border-2:#45463f;
+  --text:#e7e5dd;--text-2:#a19e93;--text-3:#6f6c62;--ink:#e7e5dd;--ink-text:#141513;
+  --accent:#4fb08c;--accent-soft:#1c2d26;
+  --green:#3fb950;--amber:#d29922;--red:#f26d5f;--blue:#58a6ff;
+  --green-soft:#1a2b1f;--amber-soft:#2d2611;--red-soft:#33201d;--blue-soft:#16233a;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--text);font:13.5px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+kbd{font:11px var(--mono);border:1px solid currentColor;opacity:.7;padding:0 4px;border-radius:2px;margin-left:8px}
+code{font:12px var(--mono);background:var(--surface-2);padding:1px 4px;border-radius:2px}
+::selection{background:var(--accent-soft)}
+.num,td,.kpi .v,.po .n,.lc .m b,.badge,.chip,#cfg-status,.delta{font-family:var(--mono)}
+
+/* ---------- top bar ---------- */
+.top{background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.top-in{max-width:1520px;margin:0 auto;padding:0 28px;display:flex;align-items:stretch;height:46px;gap:24px}
+.brand{display:flex;align-items:center;font:600 15px var(--mono);color:var(--text);letter-spacing:-.01em}
+.brand:hover{text-decoration:none}
+.brand span{font-weight:400;color:var(--text-3);margin-left:8px;font-size:11px}
+nav{display:flex;gap:2px}
+nav a{display:flex;align-items:center;padding:0 11px;color:var(--text-2);font-size:13.5px;border-bottom:2px solid transparent;margin-bottom:-1px;gap:6px}
+nav a:hover{color:var(--text);text-decoration:none}
+nav a.active{color:var(--text);border-bottom-color:var(--ink);font-weight:500}
+nav a .cnt{font:11px var(--mono);color:var(--text-3)}
+.top-r{margin-left:auto;display:flex;gap:14px;align-items:center;font:12px var(--mono);color:var(--text-2)}
+#run-indicator{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}
+#run-indicator i{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+#cfg-status{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+main{max-width:1520px;margin:0 auto;padding:24px 28px 60px;min-width:0}
+.page{display:none}
+.page.active{display:block}
+.page-h{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.page-h h1{font-size:19px;margin:0 0 2px;font-weight:600;letter-spacing:-.01em}
+.page-h .sub{margin:0;color:var(--text-2);font-size:13px}
+.page-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+@media(max-width:900px){.top-in{padding:0 14px;gap:10px;overflow-x:auto}.top-r{display:none}main{padding:16px 14px}nav a{padding:0 8px}}
+
+/* ---------- primitives ---------- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:14px}
+.card-b{padding:14px 16px}
+.card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap;min-height:40px}
+.card-h h3{margin:0;font-size:12px;font-weight:600;color:var(--text-2);letter-spacing:.06em}
+.card-f{padding:8px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.muted{color:var(--text-2);font-size:12px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 12px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px 12px}
+@media(max-width:1100px){.grid-2{grid-template-columns:1fr}}
+.btn{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border-2);color:var(--text);padding:5px 11px;border-radius:var(--r);cursor:pointer;font:500 13px var(--sans);line-height:1.4;transition:border-color .12s,background .12s;white-space:nowrap}
+.btn:hover{border-color:var(--ink);text-decoration:none}
+.btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.btn-primary{background:var(--ink);border-color:var(--ink);color:var(--ink-text)}
+.btn-primary:hover{opacity:.88}
+.btn-lg{padding:7px 16px;font-size:13.5px}
+.btn-sm{padding:3px 8px;font-size:12px}
+.btn-ghost{border-color:transparent;background:transparent}
+.btn-ghost:hover{background:var(--surface-2);border-color:transparent}
+.btn-danger{color:var(--red)}.btn-danger:hover{border-color:var(--red)}
+.input,.select,textarea.input{width:100%;background:var(--surface);border:1px solid var(--border-2);color:var(--text);padding:5px 8px;border-radius:var(--r);font:13px var(--sans)}
+input[type=number].input{font-family:var(--mono)}
+.input:focus,.select:focus,textarea.input:focus{outline:none;border-color:var(--ink)}
+.input-sm{padding:3px 7px;font-size:12px;width:auto}
+textarea.input{min-height:72px;resize:vertical}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:11.5px;color:var(--text-2);margin-bottom:4px}
+.seg{display:inline-flex;border:1px solid var(--border-2);border-radius:var(--r);overflow:hidden}
+.seg button{background:transparent;border:none;border-right:1px solid var(--border-2);padding:4px 11px;color:var(--text-2);cursor:pointer;font:500 12.5px var(--sans);white-space:nowrap}
+.seg button:last-child{border-right:none}
+.seg button:hover{color:var(--text)}
+.seg button.on{background:var(--ink);color:var(--ink-text)}
+.seg-wrap{flex-wrap:wrap}
+.seg-wrap button{border-bottom:1px solid var(--border-2);margin-bottom:-1px}
+.switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;user-select:none}
+.switch input{display:none}
+.switch span{width:28px;height:16px;border-radius:2px;background:var(--border-2);position:relative;transition:.15s;flex-shrink:0}
+.switch span::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:1px;background:var(--surface);transition:.15s}
+.switch input:checked+span{background:var(--ink)}
+.switch input:checked+span::after{left:14px}
+.badge{display:inline-flex;align-items:center;font-size:10px;font-weight:600;padding:0 5px;border-radius:2px;letter-spacing:.04em;text-transform:uppercase;border:1px solid currentColor;line-height:16px}
+.badge-openai{color:var(--green)}.badge-anthropic{color:var(--amber)}.badge-gemini{color:var(--blue)}.badge-auto{color:var(--text-3)}
+.chip{display:inline-flex;align-items:center;padding:2px 9px;border-radius:var(--r);border:1px solid var(--border-2);cursor:pointer;font-size:12px;user-select:none;background:var(--surface);transition:.1s}
+.chip:hover{border-color:var(--ink)}
+.chip.on{background:var(--ink);border-color:var(--ink);color:var(--ink-text)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.pill{display:inline-block;padding:0 6px;border-radius:2px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.g{color:var(--green)}.y{color:var(--amber)}.r{color:var(--red)}.mu{color:var(--text-3)}
+.pill.g{background:var(--green-soft)}.pill.y{background:var(--amber-soft)}.pill.r{background:var(--red-soft)}.pill.mu{background:var(--surface-2)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{padding:7px 12px;text-align:right;border-bottom:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums}
+th{background:var(--surface-2);color:var(--text-2);font-weight:500;font-size:11px;letter-spacing:.05em;position:sticky;top:0;font-family:var(--sans)}
+th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--text)}th.sorted{color:var(--text);font-weight:600}
+th:first-child,td:first-child,th.l,td.l{text-align:left}
+td.l{font-family:var(--sans)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.click{cursor:pointer}tbody tr.click:hover td{background:var(--surface-2)}
+tr.sub td{background:var(--surface-2);padding:0}
+tr.sub table{font-size:12px}tr.sub th{position:static;background:transparent}
+.delta{font-size:11px;margin-left:5px;font-weight:500}
+.empty{color:var(--text-2);text-align:center;padding:32px 16px;font-size:13px}
+.empty.big{padding:56px 16px;border:1px dashed var(--border-2);border-radius:var(--r)}
+.empty h4{margin:0 0 4px;color:var(--text);font-size:14px;font-weight:600}
+.empty .ico{display:none}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--border);background:var(--surface);border-radius:var(--r);margin-bottom:14px}
+@media(max-width:1000px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{padding:12px 16px;border-right:1px solid var(--border)}
+.kpi:last-child{border-right:none}
+.kpi .k{font-size:11px;color:var(--text-2);letter-spacing:.05em}
+.kpi .v{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:2px;line-height:1.2}
+.kpi .s{font-size:11px;color:var(--text-3);margin-top:2px}
+.grid-live{display:grid;grid-template-columns:3fr 2fr;gap:14px}
+@media(max-width:1100px){.grid-live{grid-template-columns:1fr}}
+.live-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:12px 14px}
+.lc{border:1px solid var(--border);border-radius:var(--r);padding:9px 11px;position:relative}
+.lc .t{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:9px;border-left:2px solid var(--c);margin-bottom:6px;margin-right:76px}
+.lc .bar{height:3px;background:var(--border);overflow:hidden;margin:6px 0 8px}
+.lc .bar i{display:block;height:100%;background:var(--c);width:0;transition:width .25s}
+.lc .m{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:11.5px;color:var(--text-2)}
+.lc .m b{color:var(--text);font-weight:500}
+.lc canvas{position:absolute;right:10px;top:9px;width:64px;height:20px}
+.lc .err{color:var(--red);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px;font-family:var(--mono)}
+.live-out{padding:12px 14px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto}
+.lo{border:1px solid var(--border);border-radius:var(--r);padding:7px 10px}
+.lo .h{display:flex;justify-content:space-between;font:11.5px var(--mono);color:var(--text-2);margin-bottom:4px}
+.lo .h b{color:var(--text);font-weight:600}
+.lo pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.55 var(--mono);color:var(--text);max-height:130px;overflow:hidden}
+.lo.streaming pre::after{content:"▍";color:var(--accent);animation:pulse .8s infinite}
+.lo.done{opacity:.55}
+.charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+@media(max-width:1000px){.charts{grid-template-columns:1fr}}
+.chart{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:10px;height:260px}
+.podium{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));border:1px solid var(--border);background:var(--surface);border-radius:var(--r);margin-bottom:14px;overflow:hidden}
+.podium:empty{display:none}
+.po{padding:10px 14px;border-right:1px solid var(--border);min-width:0}
+.po:last-child{border-right:none}
+.po .ico{display:none}
+.po .k{font-size:11px;color:var(--text-2);letter-spacing:.05em}
+.po .v{font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.po .n{font-size:12px;color:var(--accent);margin-top:1px}
+.legend{padding:8px 14px;font-size:11px;color:var(--text-3);border-top:1px solid var(--border)}
+.ep-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.ep-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;display:flex;flex-direction:column;gap:9px}
+.ep-card .hd{display:flex;align-items:center;gap:8px}
+.ep-card .hd b{font-size:14px}
+.ep-card .url{font:12px var(--mono);color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ep-card .models{display:flex;flex-wrap:wrap;gap:4px}
+.ep-card .models span{font:11px var(--mono);border:1px solid var(--border);padding:0 6px;border-radius:2px;color:var(--text-2)}
+.ep-card .acts{display:flex;gap:6px;margin-top:auto;flex-wrap:wrap}
+.ep-card .qt{font-size:12px;color:var(--text-2);min-height:16px;font-family:var(--mono)}
+.tg-group{margin-bottom:12px}
+.tg-group .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+.tg-group .hd b{font-weight:600}
+.tg-group .hd .btn{margin-left:auto}
+.hbar{height:6px;background:var(--border);min-width:120px}
+.hbar i{display:block;height:100%}
+dialog{border:1px solid var(--border-2);border-radius:4px;background:var(--surface);color:var(--text);padding:0;width:560px;max-width:95vw}
+dialog::backdrop{background:rgba(20,20,18,.45)}
+dialog .dh{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+dialog .dh h3{margin:0;font-size:14px;font-weight:600}
+dialog .db{padding:16px 18px;max-height:70vh;overflow:auto}
+dialog .df{padding:10px 18px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
+dialog .df .sp{flex:1}
+.picker{border:1px solid var(--border);border-radius:var(--r);padding:8px;margin-bottom:10px;background:var(--surface-2)}
+.picker .chips{max-height:170px;overflow:auto;margin-top:8px}
+pre.raw{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:12px;font:12px/1.5 var(--mono);white-space:pre-wrap;max-height:60vh;overflow:auto;margin:0}
+.err-text{color:var(--red);font:12px var(--mono);white-space:pre-wrap}
+#toasts{position:fixed;right:20px;bottom:20px;display:flex;flex-direction:column;gap:6px;z-index:50}
+.toast{background:var(--ink);color:var(--ink-text);padding:8px 12px;border-radius:var(--r);font:12.5px var(--mono);display:flex;align-items:center;gap:8px;max-width:440px;border-left:3px solid var(--text-3)}
+.toast.ok{border-left-color:var(--green)}.toast.err{border-left-color:var(--red)}.toast.info{border-left-color:var(--blue)}
+.skel{background:var(--surface-2);height:12px;border-radius:2px}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--border-2);border-top-color:var(--ink);border-radius:50%;animation:rot .7s linear infinite;vertical-align:-1px}
+@keyframes rot{to{transform:rotate(360deg)}}
+.sc-desc{font-size:12px;color:var(--text-2);margin-top:6px}
+.note{border:1px solid var(--amber);border-left-width:3px;background:var(--amber-soft);color:var(--text);padding:8px 12px;font-size:12.5px;border-radius:var(--r);margin:0 0 10px}
+.note div+div{margin-top:3px}
+.lc .m{grid-template-columns:1fr 1fr 1fr}
+.est{display:inline-block;font:10px var(--mono);color:var(--amber);border:1px solid var(--amber);padding:0 3px;border-radius:2px;margin-left:4px;vertical-align:1px}
+.base{display:inline-block;font:10px var(--mono);color:var(--accent);border:1px solid var(--accent);padding:0 3px;border-radius:2px;margin-left:6px;vertical-align:1px}
+.sd{color:var(--text-3);font-size:11px;margin-left:3px}
+.help{font-size:12.5px;color:var(--text-2);line-height:1.8}
+</style>
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <a class="brand" href="#/run">apitest<span>v{{VERSION}}</span></a>
+  <nav>
+    <a href="#/run" data-page="run">测速</a>
+    <a href="#/endpoints" data-page="endpoints">端点 <em class="cnt" id="nav-ep-cnt"></em></a>
+    <a href="#/history" data-page="history">历史</a>
+    <a href="#/models" data-page="models">模型</a>
+    <a href="#/ping" data-page="ping">诊断</a>
+    <a href="#/settings" data-page="settings">设置</a>
+  </nav>
+  <div class="top-r">
+    <span id="run-indicator" hidden><i></i>测速中</span>
+    <span id="cfg-status"></span>
+    <button class="btn btn-sm" id="theme-btn">深色</button>
+  </div>
+</div></header>
+
+<main>
+<!-- ================= 测速 ================= -->
+<section class="page" data-page="run">
+  <div class="page-h">
+    <div><h1>测速</h1><p class="sub">选择模型与参数，实时观察首字延迟、吞吐与稳定性</p></div>
+    <div class="page-actions">
+      <div class="seg" id="scenarios">
+        <button data-sc="quick" title="1 轮短输出，快速验证 Key 与连通">快速检查</button>
+        <button data-sc="standard" class="on" title="3 轮中等输出">标准</button>
+        <button data-sc="throughput" title="长输出，看稳定吞吐">吞吐</button>
+        <button data-sc="stability" title="持续 60 秒，并发 4，看 P90 / 抖动">稳定性</button>
+      </div>
+      <button class="btn btn-primary btn-lg" id="btn-start">开始测速<kbd>⌘↵</kbd></button>
+      <button class="btn btn-lg" id="btn-stop" disabled>停止</button>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-h"><h3>测试目标</h3><div class="row"><input class="input input-sm" id="tg-search" placeholder="搜索模型…"><button class="btn btn-sm" id="tg-all">全选</button><button class="btn btn-sm" id="tg-none">清空</button></div></div>
+      <div class="card-b" id="targets"></div>
+      <div class="card-f"><span class="muted" id="sel-count"></span><a href="#/endpoints">管理端点 →</a></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>参数</h3><span class="muted" id="sc-hint"></span></div>
+      <div class="card-b">
+        <div class="field"><label>提示词预设</label><div class="seg seg-wrap" id="presets"></div><div class="sc-desc" id="preset-desc"></div></div>
+        <div class="grid-3">
+          <div class="field"><label>轮次 / 模型</label><input class="input" type="number" min="1" id="o-rounds" value="3"></div>
+          <div class="field"><label>并发</label><input class="input" type="number" min="1" id="o-concurrency" value="1"></div>
+          <div class="field"><label>max_tokens</label><input class="input" type="number" min="1" id="o-max_tokens" placeholder="按预设"></div>
+        </div>
+        <div class="grid-2" style="gap:12px;margin-bottom:2px">
+          <div class="field"><label>多目标执行顺序</label><div class="seg" id="o-order"><button data-v="interleaved" class="on" title="第 1 轮 A、B、C 各一次，再第 2 轮…把供应商负载随时间的漂移摊平">交替轮询</button><button data-v="sequential" title="A 全部跑完再跑 B">逐个目标</button><button data-v="parallel" title="所有目标同时发请求，会互相抢带宽">全部并行</button></div></div>
+          <div class="field"><label>基线目标 <span class="muted">（如直连上游，用于算网关开销）</span></label><select class="select" id="o-baseline"><option value="">不设基线</option></select></div>
+        </div>
+        <details id="adv"><summary class="muted" style="cursor:pointer;margin-bottom:10px">高级参数</summary>
+          <div class="grid-4">
+            <div class="field"><label>持续压测 (秒)</label><input class="input" type="number" min="1" id="o-duration" placeholder="按轮次"></div>
+            <div class="field"><label>预热次数</label><input class="input" type="number" min="0" id="o-warmup" value="0"></div>
+            <div class="field"><label>失败重试</label><input class="input" type="number" min="0" id="o-retries" value="0"></div>
+            <div class="field"><label>超时 (秒)</label><input class="input" type="number" min="1" id="o-timeout" value="120"></div>
+            <div class="field"><label>请求间隔 (秒)</label><input class="input" type="number" min="0" step="0.1" id="o-interval" placeholder="0"></div>
+            <div class="field"><label>temperature</label><input class="input" type="number" step="0.1" id="o-temperature" placeholder="不设置"></div>
+            <div class="field"><label>代理</label><input class="input" id="o-proxy" placeholder="http://127.0.0.1:7890"></div>
+            <div class="field"><label>标签</label><input class="input" id="o-tag" placeholder="写入历史"></div>
+          </div>
+          <div class="row" style="gap:18px;margin-bottom:12px">
+            <label class="switch"><input type="checkbox" id="o-stream" checked><span></span>流式</label>
+            <label class="switch"><input type="checkbox" id="o-insecure"><span></span>忽略证书</label>
+            <label class="switch"><input type="checkbox" id="o-no_history"><span></span>不写入历史</label>
+          </div>
+        </details>
+        <div class="field"><label>自定义提示词 <span class="muted">（留空使用预设）</span></label><textarea class="input" id="o-prompt"></textarea></div>
+        <div class="field" style="margin:0"><label>System 提示词</label><input class="input" id="o-system" placeholder="可选"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="results-empty" class="empty big"><h4>还没有结果</h4><div>勾选左侧模型，选择场景后点击「开始测速」，这里会实时显示进度、曲线与排行</div></div>
+
+  <div id="results" hidden>
+    <div class="kpis" id="kpis"></div>
+    <div class="grid-live">
+      <div class="card"><div class="card-h"><h3>进度</h3><span class="muted" id="run-status"></span></div><div class="live-cards" id="live-cards"></div></div>
+      <div class="card"><div class="card-h"><h3>实时输出</h3><span class="muted">流式响应内容</span></div><div class="live-out" id="live-out"><div class="empty">等待首个 token…</div></div></div>
+    </div>
+    <div class="charts" id="charts">
+      <div class="chart"><canvas id="ch-ttft"></canvas></div>
+      <div class="chart"><canvas id="ch-tps"></canvas></div>
+      <div class="chart"><canvas id="ch-bar"></canvas></div>
+      <div class="chart"><canvas id="ch-dist"></canvas></div>
+    </div>
+    <div class="podium" id="podium"></div>
+    <div class="card"><div class="card-h"><h3>汇总</h3><span class="muted">点击列头排序 · 点击行展开每次请求 · Δ 为与上一次同目标测速的对比</span></div><div class="tw" id="summary"></div>
+      <div class="legend">TTFT=首个 token（文本或思考）· TTFT 文本=首个可见文本 token · tok/s=输出 tokens ÷ 首个文本 token 之后的时长 · ±=标准差 · CV=标准差/均值 · 卡顿=流式相邻 chunk 最长间隔 · 估=token 数为估算，不参与吞吐排名 · vs 基线=相对基线目标的增量（正数=更慢）· ↻n=经重试</div></div>
+    <div class="card"><div class="card-h"><h3>逐次明细</h3><div class="row"><label class="switch"><input type="checkbox" id="dt-fail"><span></span>只看失败</label><input class="input input-sm" id="dt-search" placeholder="搜索目标 / 内容…"></div></div><div class="tw" id="details"></div></div>
+    <div class="row" id="export"></div>
+  </div>
+</section>
+
+<!-- ================= 端点 ================= -->
+<section class="page" data-page="endpoints">
+  <div class="page-h">
+    <div><h1>端点</h1><p class="sub">管理 API 服务与模型，改动自动保存到配置文件</p></div>
+    <div class="page-actions"><button class="btn" id="btn-ep-import">从示例导入</button><button class="btn btn-primary" id="btn-ep-add">添加端点</button></div>
+  </div>
+  <div class="ep-grid" id="ep-grid"></div>
+</section>
+
+<!-- ================= 历史 ================= -->
+<section class="page" data-page="history">
+  <div class="page-h">
+    <div><h1>历史</h1><p class="sub">所有测速记录（CLI 与 Web 共用），可对比与查看趋势</p></div>
+    <div class="page-actions"><input class="input input-sm" id="h-search" placeholder="按标签 / 目标筛选…"><button class="btn" id="h-refresh">刷新</button><button class="btn" id="h-compare" disabled>对比选中 (0/2)</button></div>
+  </div>
+  <div class="card"><div class="card-h"><h3>趋势</h3><div class="row"><select class="select input-sm" id="h-trend-sel" style="min-width:220px"></select></div></div><div class="chart" style="border:none;box-shadow:none;height:240px"><canvas id="ch-trend"></canvas></div></div>
+  <div id="h-compare-box"></div>
+  <div class="card"><div class="tw" id="h-list"></div></div>
+  <div id="h-detail"></div>
+</section>
+
+<!-- ================= 模型 ================= -->
+<section class="page" data-page="models">
+  <div class="page-h">
+    <div><h1>模型</h1><p class="sub">从端点拉取可用模型，一键加入测试或快速测速</p></div>
+    <div class="page-actions"><select class="select input-sm" id="m-ep" style="min-width:180px"></select><button class="btn btn-primary" id="m-fetch">拉取模型列表</button><input class="input input-sm" id="m-search" placeholder="搜索…"></div>
+  </div>
+  <div class="card"><div class="card-h"><h3 id="m-title">模型列表</h3><span class="muted" id="m-info"></span></div><div class="tw" id="m-list"><div class="empty">选择端点后点击「拉取模型列表」</div></div></div>
+</section>
+
+<!-- ================= 诊断 ================= -->
+<section class="page" data-page="ping">
+  <div class="page-h">
+    <div><h1>连通诊断</h1><p class="sub">拆解 DNS / TCP / TLS / HTTP 各阶段延迟，判断慢在网络还是网关</p></div>
+    <div class="page-actions"><label class="muted">次数</label><input class="input input-sm" id="p-n" type="number" value="3" min="1" max="10" style="width:64px"><button class="btn btn-primary" id="p-run">开始诊断</button></div>
+  </div>
+  <div class="card"><div class="card-b"><div class="chips" id="p-eps"></div></div></div>
+  <div id="p-result"></div>
+  <div class="card" id="p-hist-card">
+    <div class="card-h"><h3>诊断历史</h3>
+      <div class="row"><select class="select input-sm" id="ph-ep" style="min-width:160px"><option value="">全部端点</option></select><input class="input input-sm" id="ph-last" type="number" value="50" min="5" max="500" style="width:70px" title="显示最近 N 条"><button class="btn btn-sm" id="ph-refresh">刷新</button><button class="btn btn-sm btn-ghost btn-danger" id="ph-clear">清空</button></div></div>
+    <div class="chart" id="ph-chart-wrap" style="border:none;height:230px"><canvas id="ph-chart"></canvas></div>
+    <div class="tw" id="ph-list"><div class="empty">暂无诊断历史</div></div>
+  </div>
+</section>
+
+<!-- ================= 设置 ================= -->
+<section class="page" data-page="settings">
+  <div class="page-h"><div><h1>设置</h1><p class="sub">默认参数、外观与数据</p></div></div>
+  <div class="grid-2">
+    <div>
+      <div class="card"><div class="card-h"><h3>默认参数</h3><span class="muted">写入配置文件 defaults，CLI 也生效</span></div><div class="card-b">
+        <div class="grid-3">
+          <div class="field"><label>轮次</label><input class="input" type="number" id="s-rounds"></div>
+          <div class="field"><label>并发</label><input class="input" type="number" id="s-concurrency"></div>
+          <div class="field"><label>max_tokens</label><input class="input" type="number" id="s-max_tokens"></div>
+          <div class="field"><label>超时 (秒)</label><input class="input" type="number" id="s-timeout"></div>
+          <div class="field"><label>默认预设</label><select class="select" id="s-preset"></select></div>
+          <div class="field"><label>代理</label><input class="input" id="s-proxy" placeholder="可选"></div>
+        </div>
+        <div class="field"><label>默认 System 提示词</label><input class="input" id="s-system"></div>
+        <button class="btn btn-primary" id="s-save">保存默认参数</button>
+      </div></div>
+      <div class="card"><div class="card-h"><h3>外观</h3></div><div class="card-b"><div class="seg" id="theme-seg"><button data-t="auto">跟随系统</button><button data-t="light">浅色</button><button data-t="dark">深色</button></div></div></div>
+    </div>
+    <div>
+      <div class="card"><div class="card-h"><h3>数据</h3></div><div class="card-b help">
+        <div>配置文件：<code id="s-cfg-path">-</code></div>
+        <div>历史记录：<code id="s-hist-path">-</code></div>
+        <div class="row" style="margin-top:12px"><button class="btn" id="s-raw">查看配置文件</button><a class="btn" href="/api/config/example" download="apitest.example.yaml">下载示例配置</a><button class="btn btn-danger" id="s-clear-hist">清空历史</button></div>
+      </div></div>
+      <div class="card"><div class="card-h"><h3>命令行</h3></div><div class="card-b help">
+        同一套配置也可以在终端使用：<br>
+        <code>apitest run --all -n 5</code> 测所有端点 · <code>apitest run -e 名称:模型 --preset long</code> · <code>apitest ping -e 名称</code> · <code>apitest history</code><br>
+        导出 <code>--export 报告.md</code>，脚本处理 <code>--json</code>。
+      </div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<div id="toasts"></div>
+
+<dialog id="dlg-ep">
+  <div class="dh"><h3 id="ep-title">添加端点</h3><button class="btn btn-ghost btn-sm" id="ep-close">×</button></div>
+  <div class="db">
+    <div class="grid-2" style="gap:12px">
+      <div class="field"><label>名称</label><input class="input" id="ep-name" placeholder="如 openai / relay"></div>
+      <div class="field"><label>API 风格</label><select class="select" id="ep-provider"><option value="">自动识别</option><option value="openai">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option></select></div>
+    </div>
+    <div class="field"><label>Base URL</label><input class="input" id="ep-url" placeholder="https://api.openai.com/v1"></div>
+    <div class="field"><label>API Key <span class="muted">可写 ${ENV_VAR} 引用环境变量</span></label><div class="row" style="flex-wrap:nowrap"><input class="input" id="ep-key" type="password"><button class="btn btn-sm" type="button" id="ep-key-toggle">显示</button><button class="btn btn-sm" type="button" id="ep-test">测试连接</button></div><div class="muted" id="ep-test-info" style="margin-top:4px"></div></div>
+    <div class="field"><label>模型 <span class="muted">逗号或换行分隔</span></label><textarea class="input" id="ep-models" placeholder="gpt-4o-mini, gpt-4o"></textarea></div>
+    <div class="row" style="margin:-6px 0 10px"><button class="btn btn-sm" type="button" id="ep-fetch">拉取模型列表</button><span class="muted" id="ep-fetch-info"></span></div>
+    <div class="picker" id="ep-picker" hidden>
+      <div class="row"><input class="input input-sm" id="ep-picker-filter" placeholder="过滤…"><button class="btn btn-sm" type="button" id="ep-picker-all">全选</button><button class="btn btn-sm" type="button" id="ep-picker-none">清空</button><span class="muted" id="ep-picker-count"></span></div>
+      <div class="chips" id="ep-picker-list"></div>
+    </div>
+    <details><summary class="muted" style="cursor:pointer;margin-bottom:8px">高级</summary>
+      <div class="field"><label>附加请求头 JSON</label><input class="input" id="ep-headers" placeholder='{"X-Custom": "1"}'></div>
+      <div class="field"><label>附加请求体 JSON</label><input class="input" id="ep-extra" placeholder='{"temperature": 0}'></div>
+      <div class="field"><label>价格 JSON <span class="muted">USD / 1M tokens，[输入, 输出]</span></label><input class="input" id="ep-price" placeholder='{"gpt-4o-mini": [0.15, 0.6]}'></div>
+    </details>
+    <div class="err-text" id="ep-err"></div>
+  </div>
+  <div class="df"><button class="btn btn-primary" id="ep-save">保存</button><button class="btn" id="ep-cancel">取消</button><span class="sp"></span><button class="btn btn-danger" id="ep-delete" hidden>删除端点</button></div>
+</dialog>
+
+<dialog id="dlg-confirm"><div class="dh"><h3 id="cf-title">确认</h3></div><div class="db" id="cf-body"></div><div class="df"><span class="sp"></span><button class="btn" id="cf-no">取消</button><button class="btn btn-primary" id="cf-yes">确定</button></div></dialog>
+<dialog id="dlg-text" style="width:760px"><div class="dh"><h3 id="tx-title"></h3><button class="btn btn-ghost btn-sm" id="tx-close">×</button></div><div class="db"><pre class="raw" id="tx-body"></pre></div></dialog>
+
+<script>
+// ============================================================ utils
+const $ = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtS = x => (!x || x <= 0) ? '-' : (x < 1 ? Math.round(x*1000)+'ms' : x.toFixed(2)+'s');
+const fmtN = (x, d=1) => (!x || x <= 0) ? '-' : Number(x).toFixed(d);
+const fmtCost = x => (x == null) ? '-' : '$' + x.toFixed(x < 0.01 ? 5 : 4);
+const cTtft = x => x <= 0 ? 'mu' : x < 0.6 ? 'g' : x < 1.5 ? 'y' : 'r';
+const cTps = x => x <= 0 ? 'mu' : x >= 60 ? 'g' : x >= 25 ? 'y' : 'r';
+const cRate = r => r >= 0.99 ? 'g' : r >= 0.9 ? 'y' : 'r';
+const PALETTE = ['#1f6f8b','#c05621','#2f855a','#b83280','#5a67d8','#b7791f','#c53030','#319795','#805ad5','#718096'];
+const hasChart = typeof Chart !== 'undefined';
+const provBadge = p => `<span class="badge badge-${p || 'auto'}">${p || 'auto'}</span>`;
+const modelsOf = ep => { const m = (ep && (ep.models ?? ep.model)) || []; return Array.isArray(m) ? m.map(String) : String(m).split(',').map(s => s.trim()).filter(Boolean); };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function api(path, opts={}) {
+  const r = await fetch(path, { headers: {'Content-Type': 'application/json'}, ...opts });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
+}
+function toast(msg, type='info', ms=3200) {
+  const t = document.createElement('div'); t.className = 'toast ' + type; t.textContent = msg; $('#toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.3s'; setTimeout(() => t.remove(), 300); }, ms);
+}
+function confirmDlg(title, body) {
+  return new Promise(res => { $('#cf-title').textContent = title; $('#cf-body').textContent = body; const d = $('#dlg-confirm'); d.showModal();
+    const done = v => { d.close(); $('#cf-yes').onclick = $('#cf-no').onclick = null; res(v); }; $('#cf-yes').onclick = () => done(true); $('#cf-no').onclick = () => done(false); });
+}
+function showText(title, text) { $('#tx-title').textContent = title; $('#tx-body').textContent = text; $('#dlg-text').showModal(); }
+$('#tx-close').onclick = () => $('#dlg-text').close();
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem('apitest.' + k)) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('apitest.' + k, JSON.stringify(v)); } catch (e) {} } };
+
+// ============================================================ theme
+function applyTheme(t) {
+  const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  $('#theme-btn').textContent = dark ? '浅色' : '深色';
+  $$('#theme-seg button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  store.set('theme', t);
+  if (hasChart) { Chart.defaults.color = dark ? '#a19e93' : '#625f56'; Chart.defaults.borderColor = dark ? '#2f302b' : '#e6e3da'; Chart.defaults.font.family = getComputedStyle(document.documentElement).getPropertyValue('--mono'); Chart.defaults.font.size = 11; for (const c of Object.values(S.charts)) c.update(); }
+}
+$('#theme-btn').onclick = () => applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+$$('#theme-seg button').forEach(b => b.onclick = () => applyTheme(b.dataset.t));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (store.get('theme', 'auto') === 'auto') applyTheme('auto'); });
+
+// ============================================================ state & router
+const S = { endpoints: {}, defaults: {}, presets: {}, selected: new Set(), run: null, es: null, charts: {}, cards: {}, live: {}, prev: {}, sort: { key: null, asc: true }, lastSnap: null, histRuns: [], histSel: new Set(), modelCache: [], pickerModels: [] };
+function route() {
+  const p = (location.hash.replace('#/', '') || 'run').split('?')[0];
+  $$('.page').forEach(s => s.classList.toggle('active', s.dataset.page === p));
+  $$('nav a').forEach(a => a.classList.toggle('active', a.dataset.page === p));
+  if (p === 'history') loadHistory();
+  if (p === 'endpoints') renderEndpoints();
+  if (p === 'ping') { renderPingEps(); loadPingHistory(); }
+  if (p === 'settings') renderSettings();
+}
+addEventListener('hashchange', route);
+
+// ============================================================ config
+async function loadConfig() {
+  const c = await api('/api/config');
+  S.endpoints = c.endpoints || {}; S.defaults = c.defaults || {}; S.presets = c.presets || {}; S.cfg = c;
+  $('#cfg-status').textContent = c.exists ? c.path.split('/').pop() : '未创建配置文件';
+  $('#cfg-status').title = c.path || '';
+  $('#presets').innerHTML = Object.entries(S.presets).map(([k, v]) => `<button data-p="${k}" title="${esc(v.desc)}">${k}</button>`).join('');
+  $$('#presets button').forEach(b => b.onclick = () => setPreset(b.dataset.p));
+  $('#s-preset').innerHTML = Object.keys(S.presets).map(k => `<option value="${k}">${k}</option>`).join('');
+  const d = S.defaults;
+  if (d.rounds) $('#o-rounds').value = d.rounds; if (d.concurrency) $('#o-concurrency').value = d.concurrency; if (d.max_tokens) $('#o-max_tokens').value = d.max_tokens; if (d.timeout) $('#o-timeout').value = d.timeout; if (d.system) $('#o-system').value = d.system; if (d.proxy) $('#o-proxy').value = d.proxy;
+  setPreset(d.prompt_preset && S.presets[d.prompt_preset] ? d.prompt_preset : 'medium', false);
+  restoreOpts();
+  refreshAll();
+}
+function refreshAll() { renderTargets(); renderEndpoints(); refreshEpSelects(); $('#nav-ep-cnt').textContent = Object.keys(S.endpoints).length || ''; }
+async function saveEndpoints(msg='已保存到配置文件') {
+  try { const r = await api('/api/config', { method: 'POST', body: JSON.stringify({ endpoints: S.endpoints }) }); $('#cfg-status').textContent = r.path.split('/').pop(); if (msg) toast(msg, 'ok', 1800); }
+  catch (e) { toast('保存失败: ' + e.message, 'err'); }
+  refreshAll();
+}
+function refreshEpSelects() { for (const id of ['#m-ep']) { const s = $(id), cur = s.value; s.innerHTML = Object.keys(S.endpoints).map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join(''); if (cur && S.endpoints[cur]) s.value = cur; } }
+
+// ============================================================ options
+const OPT_IDS = ['rounds','concurrency','max_tokens','duration','warmup','retries','timeout','interval','temperature','proxy','tag','prompt','system'];
+const CHK_IDS = ['stream','insecure','no_history'];
+S.order = 'interleaved';
+function setOrder(v, save=true) { S.order = v; $$('#o-order button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); if (save) saveOpts(); }
+$$('#o-order button').forEach(b => b.onclick = () => setOrder(b.dataset.v));
+function updateBaselineOptions() { const sel = $('#o-baseline'), cur = sel.value || S.pendingBaseline || ''; const labels = [...S.selected].map(k => k.replace('|', '/')).sort(); sel.innerHTML = '<option value="">不设基线</option>' + labels.map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join(''); if (labels.includes(cur)) { sel.value = cur; S.pendingBaseline = ''; } }
+$('#o-baseline').addEventListener('change', saveOpts);
+function setPreset(k, save=true) { S.preset = k; $$('#presets button').forEach(b => b.classList.toggle('on', b.dataset.p === k)); const p = S.presets[k]; if (p) { $('#preset-desc').textContent = `${p.desc} · max_tokens ${p.max_tokens}`; $('#o-prompt').placeholder = p.prompt.slice(0, 160); $('#o-max_tokens').placeholder = '按预设 ' + p.max_tokens; } if (save) saveOpts(); }
+function saveOpts() { const o = { preset: S.preset, order: S.order, baseline: $('#o-baseline').value }; OPT_IDS.forEach(k => o[k] = $('#o-' + k).value); CHK_IDS.forEach(k => o[k] = $('#o-' + k).checked); store.set('opts', o); store.set('selected', [...S.selected]); }
+function restoreOpts() {
+  const o = store.get('opts', null); if (o) { OPT_IDS.forEach(k => { if (o[k] !== undefined && o[k] !== '') $('#o-' + k).value = o[k]; }); CHK_IDS.forEach(k => { if (o[k] !== undefined) $('#o-' + k).checked = o[k]; }); if (o.preset && S.presets[o.preset]) setPreset(o.preset, false); if (o.order) setOrder(o.order, false); S.pendingBaseline = o.baseline || ''; }
+  (store.get('selected', []) || []).forEach(k => { const [n, m] = k.split('|'); if (S.endpoints[n] && modelsOf(S.endpoints[n]).includes(m)) S.selected.add(k); });
+}
+OPT_IDS.concat(CHK_IDS).forEach(k => $('#o-' + k).addEventListener('change', saveOpts));
+const SCENARIOS = {
+  quick: { preset: 'short', rounds: 1, concurrency: 1, duration: '', hint: '1 轮短输出，验证 Key 与连通' },
+  standard: { preset: 'medium', rounds: 3, concurrency: 1, duration: '', hint: '3 轮中等输出，兼顾首字与吞吐' },
+  throughput: { preset: 'long', rounds: 3, concurrency: 1, duration: '', hint: '长输出，看稳定吞吐 tok/s' },
+  stability: { preset: 'medium', rounds: 3, concurrency: 4, duration: 60, hint: '持续 60 秒 · 并发 4，看 P90 / CV / 卡顿' },
+};
+$$('#scenarios button').forEach(b => b.onclick = () => { const sc = SCENARIOS[b.dataset.sc]; $$('#scenarios button').forEach(x => x.classList.toggle('on', x === b)); setPreset(sc.preset, false); $('#o-rounds').value = sc.rounds; $('#o-concurrency').value = sc.concurrency; $('#o-duration').value = sc.duration; $('#sc-hint').textContent = sc.hint; if (sc.duration) $('#adv').open = true; saveOpts(); });
+function collectOptions() { const v = id => $('#o-' + id).value; const o = { preset: S.preset, order: S.order, baseline: $('#o-baseline').value }; OPT_IDS.forEach(k => o[k] = v(k)); o.stream = $('#o-stream').checked; o.insecure = $('#o-insecure').checked; o.no_history = $('#o-no_history').checked; return o; }
+
+// ============================================================ targets
+function renderTargets() {
+  const box = $('#targets'), q = $('#tg-search').value.toLowerCase(), names = Object.keys(S.endpoints);
+  if (!names.length) { box.innerHTML = '<div class="empty">还没有端点，<a href="#/endpoints">去添加 →</a></div>'; updateSelCount(); return; }
+  box.innerHTML = names.map(name => { const ep = S.endpoints[name], ms = modelsOf(ep).filter(m => !q || m.toLowerCase().includes(q) || name.toLowerCase().includes(q)); if (!ms.length) return '';
+    return `<div class="tg-group"><div class="hd"><b>${esc(name)}</b>${provBadge(ep.provider)}<span class="muted">${esc((ep.base_url || '').replace(/^https?:\/\//, ''))}</span><button class="btn btn-ghost btn-sm" data-all="${esc(name)}">全选</button></div>
+      <div class="chips">${ms.map(m => { const k = name + '|' + m; return `<span class="chip ${S.selected.has(k) ? 'on' : ''}" data-k="${esc(k)}">${esc(m)}</span>`; }).join('')}</div></div>`; }).join('') || '<div class="empty">无匹配模型</div>';
+  $$('#targets .chip').forEach(c => c.onclick = () => { const k = c.dataset.k; S.selected.has(k) ? S.selected.delete(k) : S.selected.add(k); c.classList.toggle('on'); updateSelCount(); saveOpts(); });
+  $$('#targets [data-all]').forEach(b => b.onclick = () => { modelsOf(S.endpoints[b.dataset.all]).forEach(m => S.selected.add(b.dataset.all + '|' + m)); renderTargets(); saveOpts(); });
+  updateSelCount();
+}
+function updateSelCount() { $('#sel-count').textContent = S.selected.size ? `已选 ${S.selected.size} 个模型` : '未选择模型'; updateBaselineOptions(); }
+$('#tg-search').oninput = renderTargets;
+$('#tg-all').onclick = () => { Object.entries(S.endpoints).forEach(([n, ep]) => modelsOf(ep).forEach(m => S.selected.add(n + '|' + m))); renderTargets(); saveOpts(); };
+$('#tg-none').onclick = () => { S.selected.clear(); renderTargets(); saveOpts(); };
+
+// ============================================================ run
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !S.run && $('.page.active').dataset.page === 'run') startRun(); });
+$('#btn-start').onclick = () => startRun();
+$('#btn-stop').onclick = () => { if (S.run) api(`/api/run/${S.run.id}/stop`, { method: 'POST' }); $('#btn-stop').disabled = true; };
+async function startRun(targetsOverride, optsOverride, silent=false) {
+  const targets = targetsOverride || [...S.selected].map(k => { const [endpoint, model] = k.split('|'); return { endpoint, model }; });
+  if (!targets.length) return toast('请先勾选至少一个模型', 'err');
+  if (S.run) return toast('已有测速在进行中', 'err');
+  const options = optsOverride || collectOptions();
+  let r; try { r = await api('/api/run', { method: 'POST', body: JSON.stringify({ endpoints: S.endpoints, targets, options }) }); } catch (e) { return toast('启动失败: ' + e.message, 'err'); }
+  if (silent) return r;
+  resetResults();
+  loadPrev(targets.map(t => t.endpoint + '/' + t.model));
+  S.run = { id: r.id, total: r.per_target_total, results: [], startedAt: Date.now() };
+  $('#btn-start').disabled = true; $('#btn-stop').disabled = false; $('#run-indicator').hidden = false;
+  r.targets.forEach(ensureCard);
+  S.timer = setInterval(updateKpis, 500);
+  const es = new EventSource(`/api/run/${r.id}/events`); S.es = es;
+  es.onmessage = ev => { const m = JSON.parse(ev.data);
+    if (m.type === 'target_start') ensureCard(m.label);
+    else if (m.type === 'result') onResult(m.data);
+    else if (m.type === 'progress') onProgress(m);
+    else if (m.type === 'snapshot') { (m.data.results || []).forEach(onResult); if (m.data.status !== 'running') onDone(m.data); }
+    else if (m.type === 'done') onDone(m.data); };
+  es.onerror = () => { if (S.run) { es.close(); api(`/api/run/${S.run.id}`).then(onDone).catch(e => toast('连接中断: ' + e.message, 'err')); } };
+  return r;
+}
+async function loadPrev(labels) {
+  S.prev = {};
+  try { const runs = await api('/api/history?last=100'); for (const run of runs) for (const s of run.summaries || []) { const l = s.target + '/' + s.model; if (labels.includes(l) && !S.prev[l]) S.prev[l] = { ...s, run_id: run.id, time: run.meta?.time }; } } catch (e) {}
+}
+function resetResults() {
+  if (S.es) { S.es.close(); S.es = null; } clearInterval(S.timer);
+  S.cards = {}; S.live = {}; S.lastSnap = null; S.sort = { key: null, asc: true };
+  $('#results-empty').hidden = true; $('#results').hidden = false;
+  $('#live-cards').innerHTML = ''; $('#live-out').innerHTML = '<div class="empty">等待首个 token…</div>'; $('#podium').innerHTML = ''; $('#summary').innerHTML = ''; $('#details').innerHTML = ''; $('#export').innerHTML = ''; $('#run-status').textContent = '';
+  if (hasChart) { $('#charts').hidden = false; initCharts(); } else $('#charts').hidden = true;
+  $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function colorFor(label) { if (!S.cards[label]) return PALETTE[0]; return S.cards[label].color; }
+function ensureCard(label) {
+  if (S.cards[label]) return;
+  const color = PALETTE[Object.keys(S.cards).length % PALETTE.length];
+  const el = document.createElement('div'); el.className = 'lc'; el.style.setProperty('--c', color);
+  el.innerHTML = `<div class="t">${esc(label)}</div><canvas width="140" height="44"></canvas><div class="bar"><i></i></div>
+    <div class="m"><span>完成 <b data-f="n">0</b></span><span>成功 <b data-f="ok">-</b></span><span>TTFB <b data-f="ttfb">-</b></span><span>TTFT <b data-f="ttft">-</b></span><span data-w="text" hidden>文本 <b data-f="ttft_text">-</b></span><span>tok/s <b data-f="tps">-</b></span><span>总耗时 <b data-f="total">-</b></span><span>输出 <b data-f="out">-</b></span><span>卡顿 <b data-f="gap">-</b></span><span data-w="think" hidden>思考 <b data-f="think">-</b></span></div><div class="err"></div>`;
+  $('#live-cards').appendChild(el);
+  S.cards[label] = { el, rs: [], color };
+  if (hasChart) for (const k of ['ttft', 'tps']) S.charts[k].data.datasets.push({ label, data: [], borderColor: color, backgroundColor: color, tension: .2, pointRadius: 2, borderWidth: 1.5 });
+}
+function drawSpark(canvas, vals, color) {
+  const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height; ctx.clearRect(0, 0, w, h); if (vals.length < 2) return;
+  const lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1; ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+  vals.forEach((v, i) => { const x = i / (vals.length - 1) * (w - 4) + 2, y = h - 3 - (v - lo) / sp * (h - 6); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke();
+}
+function onResult(r) {
+  if (r.warmup) return;
+  const label = r.target + '/' + r.model; ensureCard(label);
+  const c = S.cards[label]; c.rs.push(r); S.run && S.run.results.push(r);
+  const oks = c.rs.filter(x => x.ok), avg = (arr, f) => arr.length ? arr.reduce((a, x) => a + f(x), 0) / arr.length : 0, q = f => c.el.querySelector(`[data-f=${f}]`);
+  q('n').textContent = c.rs.length + (S.run && S.run.total ? '/' + S.run.total : '');
+  q('ok').textContent = `${oks.length}/${c.rs.length}`; q('ok').className = cRate(oks.length / c.rs.length);
+  const ttft = avg(oks, x => x.ttft), tpsArr = oks.filter(x => x.tps > 0), tps = avg(tpsArr, x => x.tps), ttftText = avg(oks.filter(x => x.ttft_text > 0), x => x.ttft_text), think = avg(oks, x => x.reasoning_tokens);
+  const sd = arr => { if (arr.length < 2) return 0; const m = avg(arr, x => x); return Math.sqrt(arr.reduce((a, x) => a + (x - m) ** 2, 0) / (arr.length - 1)); }, ttftSd = sd(oks.map(x => x.ttft));
+  q('ttft').innerHTML = fmtS(ttft) + (ttftSd ? `<span class="sd">±${fmtS(ttftSd)}</span>` : ''); q('ttft').className = cTtft(ttft);
+  q('ttfb').textContent = fmtS(avg(oks, x => x.ttfb));
+  const showText = ttftText > 0 && (think > 0 || Math.abs(ttftText - ttft) > 0.05); c.el.querySelector('[data-w=text]').hidden = !showText; q('ttft_text').textContent = fmtS(ttftText);
+  c.el.querySelector('[data-w=think]').hidden = !(think > 0); q('think').textContent = think > 0 ? Math.round(think) : '-';
+  const est = oks.some(x => x.tokens_estimated); q('tps').innerHTML = fmtN(tps) + (est ? '<span class="est" title="token 数为估算">估</span>' : ''); q('tps').className = est ? 'y' : cTps(tps);
+  q('gap').textContent = fmtS(Math.max(0, ...oks.map(x => x.max_gap || 0)));
+  q('total').textContent = fmtS(avg(oks, x => x.total)); q('out').innerHTML = oks.length ? Math.round(avg(oks, x => x.output_tokens)) + (est ? '<span class="est">估</span>' : '') : '-';
+  c.el.querySelector('.bar i').style.width = S.run && S.run.total ? Math.min(100, c.rs.length / S.run.total * 100) + '%' : '100%';
+  if (!r.ok) c.el.querySelector('.err').textContent = r.error;
+  drawSpark(c.el.querySelector('canvas'), oks.map(x => x.ttft * 1000), c.color);
+  const lo = S.live[label]; if (lo) { lo.el.classList.remove('streaming'); lo.el.classList.add('done'); lo.el.querySelector('.st').textContent = r.ok ? `完成 · ${fmtS(r.total)} · ${r.output_tokens} tok` : '失败'; }
+  if (hasChart) { const i = c.rs.length; for (const k of ['ttft', 'tps']) { const ch = S.charts[k], ds = ch.data.datasets.find(d => d.label === label); ds.data.push({ x: i, y: r.ok ? +(k === 'ttft' ? r.ttft * 1000 : r.tps).toFixed(1) : null }); ch.update('none'); } }
+}
+function onProgress(m) {
+  let lo = S.live[m.label];
+  if (!lo) { if ($('#live-out .empty')) $('#live-out').innerHTML = ''; const el = document.createElement('div'); el.className = 'lo'; el.innerHTML = `<div class="h"><b></b><span class="st"></span></div><pre></pre>`; $('#live-out').prepend(el); lo = S.live[m.label] = { el }; while ($('#live-out').children.length > 6) $('#live-out').lastChild.remove(); }
+  lo.el.classList.add('streaming'); lo.el.classList.remove('done'); lo.el.querySelector('b').textContent = `${m.label} #${m.index + 1}`; lo.el.querySelector('.st').textContent = `${m.chars} 字 · ${m.elapsed}s`; lo.el.querySelector('pre').textContent = m.text;
+  if (lo.el !== $('#live-out').firstChild) $('#live-out').prepend(lo.el);
+}
+function updateKpis(snap) {
+  const rs = snap ? snap.results : (S.run ? S.run.results : []); const oks = rs.filter(r => r.ok);
+  const avg = (arr, f) => arr.length ? arr.reduce((a, x) => a + f(x), 0) / arr.length : 0;
+  const el = snap ? snap.elapsed : (S.run ? (Date.now() - S.run.startedAt) / 1000 : 0);
+  const rate = rs.length ? oks.length / rs.length : 0, ttft = avg(oks.filter(r => r.ttft > 0), r => r.ttft), tps = avg(oks.filter(r => r.tps > 0), r => r.tps);
+  $('#kpis').innerHTML = [
+    ['总请求', rs.length, snap ? '已结束' : '进行中'],
+    ['成功率', rs.length ? `<span class="${cRate(rate)}">${(rate * 100).toFixed(0)}%</span>` : '-', `${oks.length} 成功 / ${rs.length - oks.length} 失败`],
+    ['平均 TTFT', `<span class="${cTtft(ttft)}">${fmtS(ttft)}</span>`, '首个 token'],
+    ['平均吞吐', `<span class="${cTps(tps)}">${fmtN(tps)}</span>`, 'tok/s'],
+    ['用时', el.toFixed(1) + 's', `${Object.keys(S.cards).length} 个目标`],
+  ].map(([k, v, s]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+  if (S.run) $('#run-status').textContent = `已完成 ${rs.length} 次请求`;
+}
+function onDone(snap) {
+  if (!S.run) return;
+  if (S.es) { S.es.close(); S.es = null; } clearInterval(S.timer);
+  const id = S.run.id; S.run = null; S.lastSnap = snap;
+  $('#btn-start').disabled = false; $('#btn-stop').disabled = true; $('#run-indicator').hidden = true;
+  updateKpis(snap);
+  const st = { done: '完成', stopped: '已停止（展示已完成部分）', error: '出错: ' + snap.error }[snap.status] || snap.status;
+  $('#run-status').textContent = `${st} · ${snap.results.length} 次请求 · ${snap.elapsed}s`;
+  toast(`测速${st} · ${snap.results.length} 次请求`, snap.status === 'error' ? 'err' : 'ok');
+  Object.values(S.live).forEach(l => l.el.classList.remove('streaming'));
+  S.curNotes = (snap.meta && snap.meta.notes) || [];
+  renderPodium(snap.summaries, snap.ranking);
+  renderSummaryTable(); renderDetails();
+  if (hasChart) { renderBar(snap.summaries); renderDist(snap.summaries); }
+  $('#export').innerHTML = ['json', 'csv', 'md'].map(f => `<a class="btn" href="/api/run/${id}/export?fmt=${f}" download>导出 ${f.toUpperCase()}</a>`).join('') + `<button class="btn" id="btn-copy-md">复制 Markdown</button>` + (snap.history_id ? `<span class="muted">历史 ID ${snap.history_id}</span>` : '');
+  $('#btn-copy-md').onclick = async () => { try { const t = await (await fetch(`/api/run/${id}/export?fmt=md`)).text(); await navigator.clipboard.writeText(t); toast('已复制 Markdown 报告', 'ok'); } catch (e) { toast('复制失败: ' + e.message, 'err'); } };
+}
+function renderPodium(sums, ranking, el) {
+  el = el || $('#podium');
+  if (!sums || sums.length < 2 || !ranking) { el.innerHTML = ''; return; }
+  const by = {}; sums.forEach(s => by[s.target + '/' + s.model] = s);
+  const items = [['ttft', '', '最快首字', l => fmtS(by[l].ttft.mean)], ['tps', '', '最高吞吐', l => fmtN(by[l].tps.mean) + ' tok/s'], ['total', '', '最短总耗时', l => fmtS(by[l].total.mean)], ['stable', '', '最稳定', l => 'CV ' + (by[l].ttft.mean ? (by[l].ttft.std / by[l].ttft.mean * 100).toFixed(0) : 0) + '%'], ['reliable', '', '最可靠', l => '成功率 ' + (by[l].success_rate * 100).toFixed(0) + '%']];
+  el.innerHTML = items.filter(([k]) => ranking[k] && by[ranking[k]]).map(([k, ico, name, f]) => `<div class="po"><div style="min-width:0"><div class="k">${name}</div><div class="v" title="${esc(ranking[k])}">${esc(ranking[k])}</div><div class="n">${f(ranking[k])}</div></div></div>`).join('');
+}
+const SUM_COLS = [
+  { k: 'label', t: '目标 / 模型', l: true, v: s => s.target + '/' + s.model, r: s => `<b>${esc(s.target)}</b><span class="mu">/${esc(s.model)}</span>` },
+  { k: 'rate', t: '成功', v: s => s.success_rate, r: s => `<span class="pill ${cRate(s.success_rate)}">${s.ok}/${s.n}${s.retried ? ' ↻' + s.retried : ''}</span>` },
+  { k: 'ttfb', t: 'TTFB', v: s => s.ttfb.mean || 1e9, r: s => fmtS(s.ttfb.mean) },
+  { k: 'ttft', t: 'TTFT', v: s => s.ttft.mean || 1e9, r: s => `<span class="${cTtft(s.ttft.mean)}">${fmtS(s.ttft.mean)}</span>${s.ttft.n > 1 ? `<span class="sd" title="标准差">±${fmtS(s.ttft.std)}</span>` : ''}${delta(s, 'ttft', true)}` },
+  { k: 'ttft_text', t: 'TTFT 文本', v: s => (s.ttft_text && s.ttft_text.mean) || 1e9, r: s => s.ttft_text && s.ttft_text.n ? fmtS(s.ttft_text.mean) : '-', text: true },
+  { k: 'ttft_base', t: 'TTFT vs 基线', v: s => s.ttft_vs_base ?? 1e9, r: s => baseDelta(s, s.ttft_vs_base), base: true },
+  { k: 'ttft90', t: 'TTFT P90', v: s => s.ttft.p90 || 1e9, r: s => fmtS(s.ttft.p90), multi: true },
+  { k: 'total', t: '总耗时', v: s => s.total.mean || 1e9, r: s => fmtS(s.total.mean) },
+  { k: 'total90', t: '总 P90', v: s => s.total.p90 || 1e9, r: s => fmtS(s.total.p90), multi: true },
+  { k: 'total_base', t: '总 vs 基线', v: s => s.total_vs_base ?? 1e9, r: s => baseDelta(s, s.total_vs_base), base: true },
+  { k: 'out', t: '输出 tok', v: s => s.out_tokens.mean, r: s => s.out_tokens.n ? Math.round(s.out_tokens.mean) + (s.tokens_source && s.tokens_source !== 'usage' ? '<span class="est" title="接口未返回 usage，按字符估算">估</span>' : '') : '-' },
+  { k: 'think', t: '思考 tok', v: s => s.reasoning_tokens_mean || 0, r: s => s.reasoning_tokens_mean ? Math.round(s.reasoning_tokens_mean) : '-', think: true },
+  { k: 'chars', t: '字数', v: s => s.text_chars_mean || 0, r: s => s.text_chars_mean ? Math.round(s.text_chars_mean) : '-' },
+  { k: 'trunc', t: '截断', v: s => s.truncated || 0, r: s => s.truncated ? `<span class="r">${s.truncated}</span>` : '-', trunc: true },
+  { k: 'tps', t: 'tok/s', v: s => s.tps.mean, r: s => `<span class="${s.tokens_source && s.tokens_source !== 'usage' ? 'y' : cTps(s.tps.mean)}">${fmtN(s.tps.mean)}</span>${s.tokens_source && s.tokens_source !== 'usage' ? '<span class="est" title="估算值，不参与排名">估</span>' : ''}${delta(s, 'tps', false)}` },
+  { k: 'tpsr', t: 'tok/s 范围', v: s => s.tps.min, r: s => s.tps.n ? `${fmtN(s.tps.min)}~${fmtN(s.tps.max)}` : '-', multi: true },
+  { k: 'cv', t: '稳定 CV', v: s => s.ttft.mean ? s.ttft.std / s.ttft.mean : 9, r: s => { const cv = s.ttft.mean ? s.ttft.std / s.ttft.mean : 0; return s.ttft.n > 1 ? `<span class="${cv < .15 ? 'g' : cv < .4 ? 'y' : 'r'}">${(cv * 100).toFixed(0)}%</span>` : '-'; }, multi: true },
+  { k: 'gap', t: '卡顿', v: s => s.max_gap.max, r: s => s.max_gap.n ? fmtS(s.max_gap.max) : '-', gap: true },
+  { k: 'cost', t: '费用', v: s => s.cost_total ?? 1e9, r: s => fmtCost(s.cost_total), cost: true },
+];
+function baseDelta(s, v) { if (s.baseline) return '<span class="base">基线</span>'; if (v == null) return '-'; return `<span class="${v > 0.02 ? 'r' : v < -0.02 ? 'g' : 'mu'}">${v >= 0 ? '+' : '-'}${fmtS(Math.abs(v))}</span>`; }
+function delta(s, k, lowerBetter) {
+  const p = S.prev[s.target + '/' + s.model]; if (!S.showDelta || !p || !p[k] || !p[k].mean || !s[k].mean) return '';
+  const d = (s[k].mean - p[k].mean) / p[k].mean; if (Math.abs(d) < 0.03) return `<span class="delta mu" title="与 ${p.time} 相比">≈</span>`;
+  const good = lowerBetter ? d < 0 : d > 0; return `<span class="delta ${good ? 'g' : 'r'}" title="上次 ${k === 'ttft' ? fmtS(p[k].mean) : fmtN(p[k].mean)} (${p.time})">${d > 0 ? '▲' : '▼'}${Math.abs(d * 100).toFixed(0)}%</span>`;
+}
+function renderSummaryTable() {
+  const snap = S.lastSnap; if (!snap) return;
+  renderSummary($('#summary'), snap.summaries, snap.results, true);
+}
+function renderSummary(el, sums, results, sortable) {
+  S.showDelta = !!sortable;
+  if (!sums || !sums.length) { el.innerHTML = '<div class="empty">无结果</div>'; return; }
+  const multi = sums.some(s => s.n > 1), gap = sums.some(s => s.max_gap && s.max_gap.n > 0), cost = sums.some(s => s.cost_total != null);
+  const think = sums.some(s => s.reasoning_tokens_mean > 0), text = think || sums.some(s => s.ttft_text && s.ttft_text.n && Math.abs(s.ttft_text.mean - s.ttft.mean) > 0.05), trunc = sums.some(s => s.truncated), base = sums.some(s => s.baseline);
+  const cols = SUM_COLS.filter(c => (!c.multi || multi) && (!c.gap || gap) && (!c.cost || cost) && (!c.think || think) && (!c.text || text) && (!c.trunc || trunc) && (!c.base || base));
+  let list = [...sums]; if (sortable && S.sort.key) { const c = cols.find(x => x.k === S.sort.key); if (c) list.sort((a, b) => { const x = c.v(a), y = c.v(b); return (x > y ? 1 : x < y ? -1 : 0) * (S.sort.asc ? 1 : -1); }); }
+  let h = (S.curNotes && S.curNotes.length ? `<div class="note" style="margin:10px 14px 0">${S.curNotes.map(n => `<div>⚠ ${esc(n)}</div>`).join('')}</div>` : '') + `<table><thead><tr><th>#</th>${cols.map(c => `<th class="${c.l ? 'l ' : ''}${sortable ? 'sortable' : ''} ${S.sort.key === c.k ? 'sorted' : ''}" data-k="${c.k}">${c.t}${S.sort.key === c.k ? (S.sort.asc ? ' ↑' : ' ↓') : ''}</th>`).join('')}</tr></thead><tbody>`;
+  list.forEach((s, i) => { const label = s.target + '/' + s.model; h += `<tr class="${results ? 'click' : ''}" data-l="${esc(label)}"><td class="mu">${i + 1}</td>${cols.map(c => `<td class="${c.l ? 'l' : ''}">${c.r(s)}${c.k === 'label' && s.baseline ? '<span class="base">基线</span>' : ''}</td>`).join('')}</tr>`; if (results) h += `<tr class="sub" data-sub="${esc(label)}" hidden><td colspan="${cols.length + 1}"></td></tr>`; });
+  h += '</tbody></table>';
+  const errs = sums.flatMap(s => Object.entries(s.errors || {}).map(([m, n]) => `<div style="padding:4px 12px"><b>${esc(s.target)}/${esc(s.model)}</b> <span class="mu">×${n}</span> <span class="r">${esc(m)}</span></div>`));
+  if (errs.length) h += `<div style="padding:8px 0;border-top:1px solid var(--border)"><div class="muted" style="padding:2px 12px 4px">错误汇总</div>${errs.join('')}</div>`;
+  el.innerHTML = h;
+  if (sortable) $$('th.sortable', el).forEach(th => th.onclick = () => { S.sort = { key: th.dataset.k, asc: S.sort.key === th.dataset.k ? !S.sort.asc : true }; renderSummaryTable(); });
+  if (results) $$('tr.click', el).forEach(tr => tr.onclick = () => { const sub = el.querySelector(`tr.sub[data-sub="${CSS.escape(tr.dataset.l)}"]`); if (!sub.hidden) { sub.hidden = true; return; } const rs = results.filter(r => r.target + '/' + r.model === tr.dataset.l);
+    sub.firstChild.innerHTML = `<table><thead><tr><th>#</th><th>状态</th><th>TTFB</th><th>TTFT</th><th>总耗时</th><th>输入</th><th>输出</th><th>tok/s</th><th>chunk</th><th>卡顿</th><th class="l">结束</th><th class="l">输出 / 错误</th></tr></thead><tbody>${rs.map(r => detailRow(r, false)).join('')}</tbody></table>`; sub.hidden = false; });
+}
+function detailRow(r, withLabel) {
+  const prev = r.ok ? (r.text || '').replace(/\s+/g, ' ').slice(0, 100) : r.error;
+  return `<tr><td class="mu">${r.index + 1}</td>${withLabel ? `<td class="l">${esc(r.target)}/${esc(r.model)}</td>` : ''}<td><span class="pill ${r.ok ? 'g' : 'r'}">${r.ok ? 'OK' : 'FAIL'}${r.attempt > 1 ? ' ↻' + r.attempt : ''}</span></td><td>${fmtS(r.ttfb)}</td><td class="${cTtft(r.ttft)}">${fmtS(r.ttft)}</td><td>${fmtS(r.total)}</td><td>${r.input_tokens || '-'}</td><td>${r.output_tokens ? (r.tokens_estimated ? '~' : '') + r.output_tokens : '-'}</td><td class="${r.tokens_estimated ? 'y' : cTps(r.tps)}">${fmtN(r.tps)}${r.tokens_estimated ? '<span class="est">估</span>' : ''}</td><td>${r.chunks || '-'}</td><td>${r.max_gap > 0 ? fmtS(r.max_gap) : '-'}</td><td class="l ${r.truncated ? 'r' : 'mu'}" title="${esc(r.stop_reason || '')}">${r.truncated ? '截断' : (r.stop_reason ? esc(r.stop_reason) : '-')}</td><td class="l ${r.ok ? 'mu' : 'r'}" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;cursor:pointer" data-full="${esc(r.ok ? r.text : r.error)}" title="点击查看完整内容">${esc(prev)}</td></tr>`;
+}
+function renderDetails() {
+  const snap = S.lastSnap; if (!snap) return;
+  const q = $('#dt-search').value.toLowerCase(), onlyFail = $('#dt-fail').checked;
+  const rs = snap.results.filter(r => (!onlyFail || !r.ok) && (!q || (r.target + '/' + r.model + ' ' + (r.text || '') + ' ' + (r.error || '')).toLowerCase().includes(q)));
+  $('#details').innerHTML = detailsTable(rs);
+}
+function detailsTable(rs) { return rs.length ? `<table><thead><tr><th>#</th><th class="l">目标 / 模型</th><th>状态</th><th>TTFB</th><th>TTFT</th><th>总耗时</th><th>输入</th><th>输出</th><th>tok/s</th><th>chunk</th><th>卡顿</th><th class="l">结束</th><th class="l">输出预览 / 错误</th></tr></thead><tbody>${rs.map(r => detailRow(r, true)).join('')}</tbody></table>` : '<div class="empty">无匹配记录</div>'; }
+$('#dt-search').oninput = renderDetails; $('#dt-fail').onchange = renderDetails;
+document.addEventListener('click', e => { const td = e.target.closest('td[data-full]'); if (td) showText('完整内容', td.dataset.full); });
+
+// ---------- charts
+const CH_BASE = () => ({ animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } } } });
+function mkLine(canvas, title, yTitle) { const base = CH_BASE(); return new Chart(canvas, { type: 'line', data: { datasets: [] }, options: { ...base, parsing: false, plugins: { ...base.plugins, title: { display: true, text: title, font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { x: { type: 'linear', title: { display: true, text: '第 N 次请求' }, ticks: { stepSize: 1, precision: 0 } }, y: { beginAtZero: true, title: { display: true, text: yTitle } } } } }); }
+function mkBar(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: '平均对比', font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'TTFT ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } }); }
+function mkDist(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: 'TTFT 分布 (min / P50 / P90 / max)', font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } }); }
+function initCharts() {
+  for (const c of Object.values(S.charts)) if (c.canvas && c.canvas.id !== 'ch-trend') c.destroy();
+  S.charts.ttft = mkLine($('#ch-ttft'), '首字延迟 TTFT', 'ms'); S.charts.tps = mkLine($('#ch-tps'), '输出吞吐', 'tok/s');
+  S.charts.bar = mkBar($('#ch-bar')); S.charts.dist = mkDist($('#ch-dist'));
+}
+function fillBar(ch, sums) { if (!ch) return; ch.data.labels = sums.map(s => s.target + '/' + s.model); ch.data.datasets = [{ label: 'TTFT 均值 (ms)', data: sums.map(s => +(s.ttft.mean * 1000).toFixed(0)), backgroundColor: '#1f6f8bcc', yAxisID: 'y', borderRadius: 0 }, { label: '吞吐 (tok/s)', data: sums.map(s => +s.tps.mean.toFixed(1)), backgroundColor: '#2f855acc', yAxisID: 'y1', borderRadius: 0 }]; ch.update(); }
+function fillDist(ch, sums) { if (!ch) return; ch.data.labels = sums.map(s => s.target + '/' + s.model); const c = ['#b8c2cc', '#4a5568', '#c05621', '#c53030']; ch.data.datasets = ['min', 'p50', 'p90', 'max'].map((k, i) => ({ label: k, data: sums.map(s => +(s.ttft[k] * 1000).toFixed(0)), backgroundColor: c[i], borderRadius: 0 })); ch.update(); }
+function fillLines(chT, chP, results) {
+  const groups = {}; results.forEach(r => { if (r.warmup) return; const l = r.target + '/' + r.model; (groups[l] = groups[l] || []).push(r); });
+  Object.entries(groups).forEach(([l, rs], i) => { const color = PALETTE[i % PALETTE.length]; rs.sort((a, b) => a.index - b.index);
+    chT.data.datasets.push({ label: l, data: rs.map((r, j) => ({ x: j + 1, y: r.ok ? +(r.ttft * 1000).toFixed(0) : null })), borderColor: color, backgroundColor: color, tension: .2, pointRadius: 2, borderWidth: 1.5 });
+    chP.data.datasets.push({ label: l, data: rs.map((r, j) => ({ x: j + 1, y: r.ok ? +r.tps.toFixed(1) : null })), borderColor: color, backgroundColor: color, tension: .2, pointRadius: 2, borderWidth: 1.5 }); });
+  chT.update(); chP.update();
+}
+const renderBar = sums => fillBar(S.charts.bar, sums), renderDist = sums => fillDist(S.charts.dist, sums);
+function rankOf(sums) {
+  const valid = sums.filter(s => s.ok > 0), r = {}; if (!valid.length) return r;
+  const lab = s => s.target + '/' + s.model, minBy = (a, f) => a.reduce((m, x) => f(x) < f(m) ? x : m), maxBy = (a, f) => a.reduce((m, x) => f(x) > f(m) ? x : m);
+  const wt = valid.filter(s => s.ttft.n > 0); if (wt.length) { r.ttft = lab(minBy(wt, s => s.ttft.mean)); r.stable = lab(minBy(wt, s => s.ttft.mean ? s.ttft.std / s.ttft.mean : 0)); }
+  const wp = valid.filter(s => s.tps.n > 0 && (!s.tokens_source || s.tokens_source === 'usage')); if (wp.length) r.tps = lab(maxBy(wp, s => s.tps.mean));
+  r.total = lab(minBy(valid, s => s.total.mean)); r.reliable = lab(maxBy(valid, s => s.success_rate * 1e6 - s.total.mean)); return r;
+}
+function kpiHtml(sums, results, elapsed, done) {
+  const rs = results || [], oks = rs.filter(r => r.ok), n = results ? rs.length : sums.reduce((a, s) => a + s.n, 0), ok = results ? oks.length : sums.reduce((a, s) => a + s.ok, 0);
+  const w = (k) => { const v = sums.filter(s => s[k].n > 0); const tot = v.reduce((a, s) => a + s[k].n, 0); return tot ? v.reduce((a, s) => a + s[k].mean * s[k].n, 0) / tot : 0; };
+  const rate = n ? ok / n : 0, ttft = w('ttft'), tps = w('tps');
+  return [['总请求', n, done ? '已结束' : '进行中'], ['成功率', n ? `<span class="${cRate(rate)}">${(rate * 100).toFixed(0)}%</span>` : '-', `${ok} 成功 / ${n - ok} 失败`], ['平均 TTFT', `<span class="${cTtft(ttft)}">${fmtS(ttft)}</span>`, '首个 token'], ['平均吞吐', `<span class="${cTps(tps)}">${fmtN(tps)}</span>`, 'tok/s'], ['用时', elapsed != null ? Number(elapsed).toFixed(1) + 's' : '-', `${sums.length} 个目标`]]
+    .map(([k, v, s]) => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join('');
+}
+
+// ============================================================ endpoints page
+function renderEndpoints() {
+  const g = $('#ep-grid'), names = Object.keys(S.endpoints);
+  if (!names.length) { g.innerHTML = '<div class="empty big" style="grid-column:1/-1"><h4>还没有端点</h4><div>点击右上角「添加端点」，填入 Base URL 与 Key，即可拉取模型开始测速</div></div>'; return; }
+  g.innerHTML = names.map(n => { const ep = S.endpoints[n], ms = modelsOf(ep); return `<div class="ep-card" data-n="${esc(n)}"><div class="hd"><b>${esc(n)}</b>${provBadge(ep.provider)}<span class="muted" style="margin-left:auto">${ms.length} 个模型</span></div>
+    <div class="url" title="${esc(ep.base_url || '')}">${esc(ep.base_url || '（默认）')}</div>
+    <div class="models">${ms.slice(0, 8).map(m => `<span>${esc(m)}</span>`).join('')}${ms.length > 8 ? `<span>+${ms.length - 8}</span>` : ''}${!ms.length ? '<span class="muted">无模型</span>' : ''}</div>
+    <div class="qt" data-qt></div>
+    <div class="acts"><button class="btn btn-sm btn-primary" data-act="test">快速测试</button><button class="btn btn-sm" data-act="edit">编辑</button><button class="btn btn-sm" data-act="models">拉取模型</button><button class="btn btn-sm" data-act="dup">复制</button><button class="btn btn-sm btn-ghost btn-danger" data-act="del">删除</button></div></div>`; }).join('');
+  $$('#ep-grid .ep-card').forEach(card => { const n = card.dataset.n;
+    card.querySelector('[data-act=edit]').onclick = () => openEpDialog(n);
+    card.querySelector('[data-act=models]').onclick = () => { $('#m-ep').value = n; location.hash = '#/models'; setTimeout(() => $('#m-fetch').click(), 50); };
+    card.querySelector('[data-act=dup]').onclick = () => { let k = n + '-copy', i = 2; while (S.endpoints[k]) k = `${n}-copy${i++}`; S.endpoints[k] = JSON.parse(JSON.stringify(S.endpoints[n])); saveEndpoints(`已复制为 ${k}`); };
+    card.querySelector('[data-act=del]').onclick = async () => { if (await confirmDlg('删除端点', `确定删除端点「${n}」？该操作会写入配置文件。`)) { delete S.endpoints[n]; [...S.selected].filter(k => k.startsWith(n + '|')).forEach(k => S.selected.delete(k)); saveEndpoints('已删除'); } };
+    card.querySelector('[data-act=test]').onclick = () => quickTest(n, modelsOf(S.endpoints[n])[0], card.querySelector('[data-qt]'), card.querySelector('[data-act=test]'));
+  });
+}
+async function quickTest(endpoint, model, out, btn) {
+  if (!model) return toast('该端点没有模型', 'err');
+  if (S.run) return toast('已有测速在进行中', 'err');
+  btn.disabled = true; out.innerHTML = `<span class="spin"></span> 正在测试 ${esc(model)}…`;
+  try {
+    const r = await startRun([{ endpoint, model }], { preset: 'short', rounds: 1, concurrency: 1, stream: true, timeout: 60, no_history: true, tag: 'quick' }, true);
+    let snap; for (let i = 0; i < 240; i++) { await sleep(500); snap = await api('/api/run/' + r.id); if (snap.status !== 'running') break; }
+    const s = snap.summaries[0], res = snap.results[0];
+    if (s && s.ok) out.innerHTML = `<span class="g">OK</span> · TTFT <b>${fmtS(s.ttft.mean)}</b> · ${fmtN(s.tps.mean)} tok/s · 总 ${fmtS(s.total.mean)} <span class="mu">(${esc(model)})</span>`;
+    else out.innerHTML = `<span class="r">FAIL</span> <span class="mu">${esc(res ? res.error : snap.error || '未知错误')}</span>`;
+  } catch (e) { out.innerHTML = `<span class="r">${esc(e.message)}</span>`; }
+  btn.disabled = false;
+}
+$('#btn-ep-add').onclick = () => openEpDialog(null);
+$('#btn-ep-import').onclick = async () => { if (Object.keys(S.endpoints).length && !await confirmDlg('从示例导入', '会把示例中的 openai / anthropic / gemini 端点加入（不覆盖同名端点）。')) return; const ex = { openai: { provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '${OPENAI_API_KEY}', models: ['gpt-4o-mini', 'gpt-4o'] }, anthropic: { provider: 'anthropic', base_url: 'https://api.anthropic.com', api_key: '${ANTHROPIC_API_KEY}', models: ['claude-sonnet-5', 'claude-haiku-4-5'] }, gemini: { provider: 'gemini', base_url: 'https://generativelanguage.googleapis.com', api_key: '${GEMINI_API_KEY}', models: ['gemini-2.5-flash'] } }; for (const [k, v] of Object.entries(ex)) if (!S.endpoints[k]) S.endpoints[k] = v; saveEndpoints('已导入示例端点，请填入 Key'); };
+
+// ---------- endpoint dialog
+let editingName = null;
+function openEpDialog(name) {
+  editingName = name || null; const ep = name ? S.endpoints[name] : {};
+  $('#ep-title').textContent = name ? '编辑端点 · ' + name : '添加端点';
+  $('#ep-name').value = name || ''; $('#ep-provider').value = ep.provider || ''; $('#ep-url').value = ep.base_url || ep.url || '';
+  $('#ep-key').value = ep.api_key || ep.key || ''; $('#ep-key').type = 'password'; $('#ep-key-toggle').textContent = '显示';
+  $('#ep-models').value = modelsOf(ep).join('\n');
+  $('#ep-headers').value = ep.headers ? JSON.stringify(ep.headers) : ''; $('#ep-extra').value = ep.extra_body ? JSON.stringify(ep.extra_body) : ''; $('#ep-price').value = ep.price ? JSON.stringify(ep.price) : '';
+  $('#ep-err').textContent = ''; $('#ep-test-info').textContent = ''; $('#ep-fetch-info').textContent = ''; $('#ep-delete').hidden = !name;
+  S.pickerModels = []; $('#ep-picker').hidden = true; $('#ep-picker-filter').value = '';
+  $('#dlg-ep').showModal(); setTimeout(() => $(name ? '#ep-url' : '#ep-name').focus(), 50);
+}
+$('#ep-cancel').onclick = $('#ep-close').onclick = () => $('#dlg-ep').close();
+$('#ep-key-toggle').onclick = () => { const k = $('#ep-key'); k.type = k.type === 'password' ? 'text' : 'password'; $('#ep-key-toggle').textContent = k.type === 'password' ? '显示' : '隐藏'; };
+function dialogEp() { const ep = { base_url: $('#ep-url').value.trim(), api_key: $('#ep-key').value.trim(), models: $('#ep-models').value.split(/[\n,]/).map(s => s.trim()).filter(Boolean) }; const p = $('#ep-provider').value; if (p) ep.provider = p; const h = $('#ep-headers').value.trim(); if (h) ep.headers = JSON.parse(h); return ep; }
+$('#ep-test').onclick = async () => { $('#ep-test-info').innerHTML = '<span class="spin"></span> 测试中…'; try { const ep = dialogEp(); ep.models = ['-']; const r = await api('/api/ping', { method: 'POST', body: JSON.stringify({ endpoints: { __tmp__: ep }, endpoint: '__tmp__', rounds: 1, insecure: $('#o-insecure').checked, proxy: $('#o-proxy').value }) }); const x = r.rows[0]; $('#ep-test-info').innerHTML = x.error ? `<span class="r">${esc(x.error)}</span>` : `<span class="${x.status < 400 ? 'g' : 'y'}">HTTP ${x.status}</span> · DNS ${fmtS(x.dns)} · TCP ${fmtS(x.tcp)} · TLS ${fmtS(x.tls)} · 请求 ${fmtS(x.http)}${x.status === 401 || x.status === 403 ? ' <span class="r">（Key 可能无效）</span>' : ''}`; } catch (e) { $('#ep-test-info').innerHTML = `<span class="r">${esc(e.message)}</span>`; } };
+$('#ep-fetch').onclick = async () => {
+  $('#ep-err').textContent = ''; $('#ep-fetch-info').innerHTML = '<span class="spin"></span> 拉取中…'; $('#ep-fetch').disabled = true;
+  try { const ep = dialogEp(); ep.models = ['-']; if (!ep.base_url && ep.provider !== 'gemini') throw new Error('请先填写 Base URL');
+    const r = await api('/api/models', { method: 'POST', body: JSON.stringify({ endpoints: { __tmp__: ep }, endpoint: '__tmp__', insecure: $('#o-insecure').checked }) });
+    S.pickerModels = r.models; $('#ep-fetch-info').textContent = `共 ${r.models.length} 个模型 · ${Math.round(r.elapsed * 1000)}ms，点击勾选`; $('#ep-picker').hidden = !r.models.length; renderPicker();
+  } catch (e) { $('#ep-fetch-info').textContent = ''; $('#ep-err').textContent = '拉取失败: ' + e.message; } finally { $('#ep-fetch').disabled = false; }
+};
+const epModelsSet = () => new Set($('#ep-models').value.split(/[\n,]/).map(s => s.trim()).filter(Boolean));
+const epModelsWrite = set => { $('#ep-models').value = [...set].join('\n'); };
+function renderPicker() { const f = $('#ep-picker-filter').value.toLowerCase(), have = epModelsSet(), list = S.pickerModels.filter(m => m.id.toLowerCase().includes(f));
+  $('#ep-picker-list').innerHTML = list.map(m => `<span class="chip ${have.has(m.id) ? 'on' : ''}" data-id="${esc(m.id)}" title="${esc(m.name || '')}">${esc(m.id)}</span>`).join('') || '<span class="muted">无匹配</span>';
+  $('#ep-picker-count').textContent = `已选 ${[...have].filter(id => S.pickerModels.some(m => m.id === id)).length} / ${S.pickerModels.length}`;
+  $$('#ep-picker-list .chip').forEach(c => c.onclick = () => { const s = epModelsSet(); s.has(c.dataset.id) ? s.delete(c.dataset.id) : s.add(c.dataset.id); epModelsWrite(s); renderPicker(); }); }
+$('#ep-picker-filter').oninput = renderPicker;
+$('#ep-picker-all').onclick = () => { const s = epModelsSet(), f = $('#ep-picker-filter').value.toLowerCase(); S.pickerModels.filter(m => m.id.toLowerCase().includes(f)).forEach(m => s.add(m.id)); epModelsWrite(s); renderPicker(); };
+$('#ep-picker-none').onclick = () => { const s = epModelsSet(); S.pickerModels.forEach(m => s.delete(m.id)); epModelsWrite(s); renderPicker(); };
+$('#ep-models').addEventListener('input', () => { if (S.pickerModels.length) renderPicker(); });
+$('#ep-delete').onclick = async () => { if (editingName && await confirmDlg('删除端点', `确定删除端点「${editingName}」？`)) { delete S.endpoints[editingName]; [...S.selected].filter(k => k.startsWith(editingName + '|')).forEach(k => S.selected.delete(k)); $('#dlg-ep').close(); saveEndpoints('已删除'); } };
+$('#ep-save').onclick = () => {
+  const name = $('#ep-name').value.trim(), err = m => { $('#ep-err').textContent = m; };
+  if (!name) return err('名称不能为空'); if (name !== editingName && S.endpoints[name]) return err('名称已存在');
+  const parseJ = (v, what) => { if (!v.trim()) return null; try { const o = JSON.parse(v); if (typeof o !== 'object') throw 0; return o; } catch (e) { throw new Error(what + ' 不是合法 JSON'); } };
+  let headers, extra, price; try { headers = parseJ($('#ep-headers').value, '请求头'); extra = parseJ($('#ep-extra').value, '请求体'); price = parseJ($('#ep-price').value, '价格'); } catch (e) { return err(e.message); }
+  const old = editingName ? S.endpoints[editingName] : {};
+  const ep = { ...old, base_url: $('#ep-url').value.trim(), api_key: $('#ep-key').value.trim(), models: $('#ep-models').value.split(/[\n,]/).map(s => s.trim()).filter(Boolean) };
+  delete ep.url; delete ep.key; delete ep.model;
+  const prov = $('#ep-provider').value; if (prov) ep.provider = prov; else delete ep.provider;
+  if (headers) ep.headers = headers; else delete ep.headers; if (extra) ep.extra_body = extra; else delete ep.extra_body; if (price) ep.price = price; else delete ep.price;
+  if (!ep.base_url && ep.provider !== 'gemini') return err('Base URL 不能为空');
+  if (editingName && editingName !== name) { delete S.endpoints[editingName]; [...S.selected].filter(k => k.startsWith(editingName + '|')).forEach(k => { S.selected.delete(k); S.selected.add(name + '|' + k.split('|')[1]); }); }
+  S.endpoints[name] = ep; $('#dlg-ep').close(); saveEndpoints();
+};
+
+// ============================================================ history page
+async function loadHistory() {
+  try { S.histRuns = await api('/api/history?last=200'); } catch (e) { $('#h-list').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  renderHistoryList(); renderTrendSelect();
+}
+function renderHistoryList() {
+  const q = $('#h-search').value.toLowerCase();
+  const runs = S.histRuns.filter(r => !q || JSON.stringify(r.meta || {}).toLowerCase().includes(q) || (r.summaries || []).some(s => (s.target + '/' + s.model).toLowerCase().includes(q)));
+  if (!runs.length) { $('#h-list').innerHTML = '<div class="empty">暂无历史记录</div>'; return; }
+  let h = '<table><thead><tr><th></th><th class="l">时间</th><th class="l">标签</th><th class="l">预设</th><th class="l">目标</th><th>请求</th><th>最快 TTFT</th><th>最高 tok/s</th><th></th></tr></thead><tbody>';
+  for (const run of runs) { const m = run.meta || {}, sums = run.summaries || [], oks = sums.filter(s => s.ok > 0);
+    const bestT = oks.length ? Math.min(...oks.map(s => s.ttft.mean || 1e9)) : 0, bestP = oks.length ? Math.max(...oks.map(s => s.tps.mean || 0)) : 0, n = sums.reduce((a, s) => a + s.n, 0);
+    h += `<tr class="click" data-id="${esc(run.id)}"><td><input type="checkbox" data-sel="${esc(run.id)}" ${S.histSel.has(run.id) ? 'checked' : ''}></td><td class="l">${esc(m.time || '')}${m.source === 'web' ? '' : ' <span class="badge badge-auto">cli</span>'}</td><td class="l">${esc(m.tag || '-')}</td><td class="l">${esc(m.preset || '自定义')}</td>
+      <td class="l">${sums.slice(0, 3).map(s => `<span class="pill mu" style="font-weight:500">${esc(s.target)}/${esc(s.model)}</span>`).join(' ')}${sums.length > 3 ? ` <span class="mu">+${sums.length - 3}</span>` : ''}</td><td>${n}</td><td class="${cTtft(bestT)}">${fmtS(bestT)}</td><td class="${cTps(bestP)}">${fmtN(bestP)}</td>
+      <td><button class="btn btn-sm btn-ghost btn-danger" data-del="${esc(run.id)}">删除</button></td></tr>`; }
+  $('#h-list').innerHTML = h + '</tbody></table>';
+  $$('#h-list tr.click').forEach(tr => tr.onclick = e => { if (e.target.closest('button,input')) return; showHistory(tr.dataset.id); });
+  $$('#h-list [data-sel]').forEach(cb => cb.onchange = () => { cb.checked ? S.histSel.add(cb.dataset.sel) : S.histSel.delete(cb.dataset.sel); if (S.histSel.size > 2) { S.histSel.delete(cb.dataset.sel); cb.checked = false; toast('最多选择 2 条进行对比', 'err'); } $('#h-compare').textContent = `对比选中 (${S.histSel.size}/2)`; $('#h-compare').disabled = S.histSel.size !== 2; });
+  $$('#h-list [data-del]').forEach(b => b.onclick = async () => { if (await confirmDlg('删除记录', '确定删除这条测速记录？')) { await api('/api/history/' + b.dataset.del, { method: 'DELETE' }); S.histSel.delete(b.dataset.del); toast('已删除', 'ok'); loadHistory(); } });
+}
+$('#h-search').oninput = renderHistoryList; $('#h-refresh').onclick = loadHistory;
+S.hcharts = {};
+async function showHistory(id) {
+  const run = S.histRuns.find(r => r.id === id) || await api('/api/history/' + id); const m = run.meta || {}, sums = run.summaries || [], results = run.results || null;
+  for (const c of Object.values(S.hcharts)) c.destroy(); S.hcharts = {};
+  const el = $('#h-detail');
+  el.innerHTML = `<div class="card"><div class="card-h"><div><h3>记录 ${esc(run.id)}</h3><span class="muted">${esc(m.time)} · 标签 ${esc(m.tag || '-')} · 预设 ${esc(m.preset || '自定义')} · max_tokens ${m.max_tokens} · ${m.rounds ? m.rounds + ' 轮' : '持续 ' + m.duration + 's'} · 并发 ${m.concurrency} · ${m.stream ? '流式' : '非流式'}${m.interrupted ? ' · <span class="y">中途停止</span>' : ''}</span></div>
+      <div class="row"><a class="btn btn-sm" href="/api/history/${esc(run.id)}/export?fmt=json" download>导出 JSON</a><a class="btn btn-sm" href="/api/history/${esc(run.id)}/export?fmt=csv" download>导出 CSV</a><a class="btn btn-sm" href="/api/history/${esc(run.id)}/export?fmt=md" download>导出 MD</a><button class="btn btn-sm btn-ghost" id="h-close">× 关闭</button></div></div></div>
+    <div class="kpis">${kpiHtml(sums, results, m.elapsed, true)}</div>
+    <div class="charts">${results && hasChart ? '<div class="chart"><canvas id="h-ch-ttft"></canvas></div><div class="chart"><canvas id="h-ch-tps"></canvas></div>' : ''}${hasChart ? '<div class="chart"><canvas id="h-ch-bar"></canvas></div><div class="chart"><canvas id="h-ch-dist"></canvas></div>' : ''}</div>
+    <div class="podium" id="h-podium"></div>
+    <div class="card"><div class="card-h"><h3>汇总</h3><span class="muted">${results ? '点击行展开每次请求' : ''}</span></div><div class="tw" id="h-sum"></div><div class="legend">TTFT=首个 token 延迟 · tok/s=输出 tokens ÷ 首字后的生成时长 · CV=标准差/均值(越小越稳) · 卡顿=流式相邻 chunk 最长间隔 · ~=token 数为估算 · ↻n=经重试的请求数</div></div>
+    ${results ? `<div class="card"><div class="card-h"><h3>逐次明细</h3><div class="row"><label class="switch"><input type="checkbox" id="h-dt-fail"><span></span>只看失败</label><input class="input input-sm" id="h-dt-search" placeholder="搜索目标 / 内容…"></div></div><div class="tw" id="h-details"></div></div>` : '<div class="muted" style="padding:4px 2px 12px">该记录由旧版本生成，没有保存逐次明细与实时曲线。</div>'}`;
+  $('#h-close').onclick = () => { for (const c of Object.values(S.hcharts)) c.destroy(); S.hcharts = {}; el.innerHTML = ''; };
+  if (hasChart) { S.hcharts.bar = mkBar($('#h-ch-bar')); fillBar(S.hcharts.bar, sums); S.hcharts.dist = mkDist($('#h-ch-dist')); fillDist(S.hcharts.dist, sums);
+    if (results) { S.hcharts.ttft = mkLine($('#h-ch-ttft'), '首字延迟 TTFT', 'ms'); S.hcharts.tps = mkLine($('#h-ch-tps'), '输出吞吐', 'tok/s'); fillLines(S.hcharts.ttft, S.hcharts.tps, results); } }
+  S.curNotes = m.notes || [];
+  renderPodium(sums, rankOf(sums), $('#h-podium'));
+  renderSummary($('#h-sum'), sums, results, false);
+  if (results) { const draw = () => { const q = $('#h-dt-search').value.toLowerCase(), onlyFail = $('#h-dt-fail').checked; $('#h-details').innerHTML = detailsTable(results.filter(r => (!onlyFail || !r.ok) && (!q || (r.target + '/' + r.model + ' ' + (r.text || '') + ' ' + (r.error || '')).toLowerCase().includes(q)))); }; $('#h-dt-search').oninput = draw; $('#h-dt-fail').onchange = draw; draw(); }
+  el.scrollIntoView({ behavior: 'smooth' });
+}
+$('#h-compare').onclick = () => {
+  const [a, b] = [...S.histSel].map(id => S.histRuns.find(r => r.id === id)).sort((x, y) => (x.meta?.time || '').localeCompare(y.meta?.time || '')); if (!a || !b) return;
+  const labels = [...new Set([...a.summaries, ...b.summaries].map(s => s.target + '/' + s.model))], by = r => Object.fromEntries(r.summaries.map(s => [s.target + '/' + s.model, s]));
+  const A = by(a), B = by(b), cell = (x, y, f, lower) => { if (!x || !y) return `<td>${x ? f(x) : '-'}</td><td>${y ? f(y) : '-'}</td><td>-</td>`; const vx = x.mean ?? x, vy = y.mean ?? y, d = vx ? (vy - vx) / vx : 0, good = lower ? d < 0 : d > 0; return `<td>${f(x)}</td><td>${f(y)}</td><td class="${Math.abs(d) < .03 ? 'mu' : good ? 'g' : 'r'}">${d > 0 ? '▲' : '▼'}${Math.abs(d * 100).toFixed(0)}%</td>`; };
+  $('#h-compare-box').innerHTML = `<div class="card"><div class="card-h"><h3>对比</h3><span class="muted">A = ${esc(a.meta?.time)} ${esc(a.meta?.tag || '')} → B = ${esc(b.meta?.time)} ${esc(b.meta?.tag || '')}</span><button class="btn btn-sm btn-ghost" onclick="this.closest('.card').remove()">×</button></div><div class="tw"><table><thead><tr><th class="l">目标</th><th>TTFT A</th><th>TTFT B</th><th>Δ</th><th>tok/s A</th><th>tok/s B</th><th>Δ</th><th>总耗时 A</th><th>总耗时 B</th><th>Δ</th><th>成功率 A</th><th>成功率 B</th><th>Δ</th></tr></thead><tbody>${labels.map(l => `<tr><td class="l">${esc(l)}</td>${cell(A[l]?.ttft, B[l]?.ttft, x => fmtS(x.mean), true)}${cell(A[l]?.tps, B[l]?.tps, x => fmtN(x.mean), false)}${cell(A[l]?.total, B[l]?.total, x => fmtS(x.mean), true)}${cell(A[l]?.success_rate, B[l]?.success_rate, x => (x * 100).toFixed(0) + '%', false)}</tr>`).join('')}</tbody></table></div></div>`;
+  $('#h-compare-box').scrollIntoView({ behavior: 'smooth' });
+};
+function renderTrendSelect() {
+  const labels = [...new Set(S.histRuns.flatMap(r => (r.summaries || []).map(s => s.target + '/' + s.model)))].sort(); const sel = $('#h-trend-sel'), cur = sel.value;
+  sel.innerHTML = labels.map(l => `<option value="${esc(l)}">${esc(l)}</option>`).join('') || '<option value="">暂无数据</option>'; if (cur && labels.includes(cur)) sel.value = cur; renderTrend();
+}
+$('#h-trend-sel').onchange = renderTrend;
+function renderTrend() {
+  if (!hasChart) return; const l = $('#h-trend-sel').value; const pts = S.histRuns.filter(r => (r.summaries || []).some(s => s.target + '/' + s.model === l)).map(r => ({ t: r.meta?.time || r.id, s: r.summaries.find(s => s.target + '/' + s.model === l) })).filter(p => p.s.ok > 0).reverse();
+  if (S.charts.trend) S.charts.trend.destroy();
+  S.charts.trend = new Chart($('#ch-trend'), { type: 'line', data: { labels: pts.map(p => p.t.slice(5, 16)), datasets: [{ label: 'TTFT 均值 (ms)', data: pts.map(p => +(p.s.ttft.mean * 1000).toFixed(0)), borderColor: '#1f6f8b', backgroundColor: '#1f6f8b', yAxisID: 'y', tension: .2, borderWidth: 1.5, pointRadius: 2 }, { label: '吞吐 (tok/s)', data: pts.map(p => +p.s.tps.mean.toFixed(1)), borderColor: '#2f855a', backgroundColor: '#2f855a', yAxisID: 'y1', tension: .2, borderWidth: 1.5, pointRadius: 2 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: !pts.length, text: '该目标暂无成功记录' } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } });
+}
+
+// ============================================================ models page
+$('#m-fetch').onclick = async () => {
+  const name = $('#m-ep').value; if (!name) return toast('请先添加端点', 'err');
+  $('#m-info').innerHTML = '<span class="spin"></span> 拉取中…'; $('#m-list').innerHTML = '<div class="card-b"><div class="skel" style="width:60%"></div><br><div class="skel" style="width:40%"></div><br><div class="skel" style="width:50%"></div></div>';
+  try { const r = await api('/api/models', { method: 'POST', body: JSON.stringify({ endpoints: S.endpoints, endpoint: name, insecure: $('#o-insecure').checked }) }); S.modelCache = r.models; S.modelEp = name; $('#m-title').textContent = name + ' 的模型'; $('#m-info').textContent = `${r.models.length} 个模型 · ${Math.round(r.elapsed * 1000)}ms · ${r.url}`; renderModels(); }
+  catch (e) { $('#m-info').textContent = ''; $('#m-list').innerHTML = `<div class="empty r">${esc(e.message)}</div>`; }
+};
+$('#m-search').oninput = () => renderModels();
+function renderModels() {
+  const name = S.modelEp, f = $('#m-search').value.toLowerCase(), have = new Set(modelsOf(S.endpoints[name] || {})), list = S.modelCache.filter(m => m.id.toLowerCase().includes(f) || (m.name || '').toLowerCase().includes(f));
+  if (!list.length) { $('#m-list').innerHTML = '<div class="empty">无匹配模型</div>'; return; }
+  $('#m-list').innerHTML = `<table><thead><tr><th class="l">模型 ID</th><th class="l">名称 / 所有者</th><th class="l">创建</th><th class="l">快速测速结果</th><th></th></tr></thead><tbody>${list.map(m => `<tr data-id="${esc(m.id)}"><td class="l"><code>${esc(m.id)}</code></td><td class="l mu">${esc(m.name)}</td><td class="l mu">${typeof m.created === 'number' ? new Date(m.created * 1000).toISOString().slice(0, 10) : esc(m.created)}</td><td class="l" data-qt></td>
+    <td><div class="row" style="justify-content:flex-end;flex-wrap:nowrap"><button class="btn btn-sm" data-test>快速测速</button>${have.has(m.id) ? '<span class="pill g">已在列表</span>' : `<button class="btn btn-sm btn-primary" data-add>加入测试</button>`}</div></td></tr>`).join('')}</tbody></table>`;
+  $$('#m-list tr').forEach(tr => { const id = tr.dataset.id; if (!id) return;
+    const add = tr.querySelector('[data-add]'); if (add) add.onclick = () => { const ep = S.endpoints[name]; ep.models = [...modelsOf(ep), id]; S.selected.add(name + '|' + id); saveEndpoints(`已加入 ${id}`); renderModels(); };
+    tr.querySelector('[data-test]').onclick = () => quickTest(name, id, tr.querySelector('[data-qt]'), tr.querySelector('[data-test]')); });
+}
+
+// ============================================================ ping page
+function renderPingEps() { const names = Object.keys(S.endpoints); $('#p-eps').innerHTML = names.map(n => `<span class="chip on" data-n="${esc(n)}">${esc(n)}</span>`).join('') || '<span class="muted">暂无端点</span>'; $$('#p-eps .chip').forEach(c => c.onclick = () => c.classList.toggle('on')); }
+$('#p-run').onclick = async () => {
+  const names = $$('#p-eps .chip.on').map(c => c.dataset.n); if (!names.length) return toast('请选择端点', 'err');
+  $('#p-run').disabled = true; $('#p-result').innerHTML = '';
+  for (const n of names) { const box = document.createElement('div'); box.className = 'card'; box.innerHTML = `<div class="card-h"><h3>${esc(n)}</h3><span class="muted"><span class="spin"></span> 诊断中…</span></div>`; $('#p-result').appendChild(box);
+    try { const r = await api('/api/ping', { method: 'POST', body: JSON.stringify({ endpoints: S.endpoints, endpoint: n, rounds: $('#p-n').value, proxy: $('#o-proxy').value, insecure: $('#o-insecure').checked }) });
+      const rows = r.rows, oks = rows.filter(x => !x.error), avg = f => { const v = oks.map(x => x[f]).filter(x => x > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; }, mx = Math.max(...rows.map(x => x.http), 0.001);
+      box.innerHTML = `<div class="card-h"><h3>${esc(n)}</h3><span class="muted">${esc(r.url)} · ${oks.length}/${rows.length} 成功 · 平均 <b class="${cTtft(avg('http'))}">${fmtS(avg('http'))}</b></span></div><div class="tw"><table><thead><tr><th>#</th><th class="l">IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>HTTP</th><th class="l" style="width:200px">耗时</th><th class="l">状态</th><th class="l">服务器</th></tr></thead><tbody>${rows.map((x, i) => `<tr><td class="mu">${i + 1}</td><td class="l mu">${esc(x.ip)}</td><td>${fmtS(x.dns)}</td><td>${fmtS(x.tcp)}</td><td>${fmtS(x.tls)}</td><td class="${cTtft(x.http)}">${fmtS(x.http)}</td><td class="l"><div class="hbar"><i style="width:${x.http / mx * 100}%;background:var(--${x.http < .6 ? 'green' : x.http < 1.5 ? 'amber' : 'red'})"></i></div></td><td class="l ${x.error ? 'r' : x.status < 400 ? 'g' : 'y'}">${x.error ? esc(x.error) : 'HTTP ' + x.status}</td><td class="l mu">${esc(x.server)}</td></tr>`).join('')}<tr><td class="mu">均值</td><td></td><td>${fmtS(avg('dns'))}</td><td>${fmtS(avg('tcp'))}</td><td>${fmtS(avg('tls'))}</td><td><b>${fmtS(avg('http'))}</b></td><td colspan="3"></td></tr></tbody></table></div>`;
+    } catch (e) { box.innerHTML = `<div class="card-h"><h3>${esc(n)}</h3><span class="r">${esc(e.message)}</span></div>`; } }
+  $('#p-run').disabled = false;
+  if (names.length === 1) $('#ph-ep').value = names[0];
+  loadPingHistory();
+};
+// ---------- 诊断历史
+S.pingHist = []; S.pingChart = null;
+async function loadPingHistory() {
+  try { S.pingHist = await api('/api/ping/history?last=500'); } catch (e) { $('#ph-list').innerHTML = `<div class="empty r">${esc(e.message)}</div>`; return; }
+  const sel = $('#ph-ep'), cur = sel.value, eps = [...new Set([...S.pingHist.map(r => r.endpoint), ...Object.keys(S.endpoints)])].sort();
+  sel.innerHTML = '<option value="">全部端点</option>' + eps.map(e => `<option value="${esc(e)}">${esc(e)}</option>`).join(''); if (eps.includes(cur)) sel.value = cur;
+  renderPingHistory();
+}
+function renderPingHistory() {
+  const ep = $('#ph-ep').value, last = Math.max(5, +$('#ph-last').value || 50);
+  const recs = S.pingHist.filter(r => !ep || r.endpoint === ep).slice(0, last);
+  $('#ph-clear').textContent = ep ? `清空 ${ep}` : '清空全部';
+  // 趋势图：单端点时画 DNS/TCP/TLS/HTTP 四条线；全部端点时每个端点一条 HTTP 线
+  if (hasChart) {
+    if (S.pingChart) S.pingChart.destroy();
+    const asc = [...recs].reverse(), fam = getComputedStyle(document.documentElement).getPropertyValue('--sans');
+    let datasets, labels;
+    if (ep) { labels = asc.map(r => r.time.slice(5, 16)); const mk = (k, name, color) => ({ label: name, data: asc.map(r => r.ok ? +((r.avg[k] || 0) * 1000).toFixed(0) : null), borderColor: color, backgroundColor: color, tension: .2, borderWidth: 1.5, pointRadius: 2 }); datasets = [mk('dns', 'DNS', '#718096'), mk('tcp', 'TCP', '#b7791f'), mk('tls', 'TLS', '#5a67d8'), mk('http', 'HTTP', '#1f6f8b')]; }
+    else { const groups = {}; asc.forEach(r => (groups[r.endpoint] = groups[r.endpoint] || []).push(r)); const times = [...new Set(asc.map(r => r.time))]; labels = times.map(t => t.slice(5, 16));
+      datasets = Object.entries(groups).map(([n, rs], i) => ({ label: n, data: times.map(t => { const r = rs.find(x => x.time === t); return r && r.ok ? +((r.avg.http || 0) * 1000).toFixed(0) : null; }), borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length], tension: .2, borderWidth: 1.5, pointRadius: 2, spanGaps: true })); }
+    $('#ph-chart-wrap').hidden = !recs.length;
+    if (recs.length) S.pingChart = new Chart($('#ph-chart'), { type: 'line', data: { labels, datasets }, options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: true, text: ep ? `${ep} · 各阶段耗时趋势 (ms)` : '各端点 HTTP 耗时趋势 (ms)', font: { weight: '600', family: fam } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } });
+  }
+  if (!recs.length) { $('#ph-list').innerHTML = '<div class="empty">暂无诊断历史</div>'; return; }
+  $('#ph-list').innerHTML = `<table><thead><tr><th class="l">时间</th><th class="l">端点</th><th class="l">IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>HTTP 均值</th><th>HTTP 最大</th><th>成功</th><th class="l">状态</th><th class="l">来源</th><th></th></tr></thead><tbody>${recs.map(r => `<tr class="click" data-id="${esc(r.id)}"><td class="l">${esc(r.time)}</td><td class="l"><b>${esc(r.endpoint)}</b></td><td class="l mu">${esc(r.ip || '-')}</td><td>${fmtS(r.avg.dns)}</td><td>${fmtS(r.avg.tcp)}</td><td>${fmtS(r.avg.tls)}</td><td class="${cTtft(r.avg.http)}">${fmtS(r.avg.http)}</td><td>${fmtS(r.http_max)}</td><td><span class="pill ${cRate(r.n ? r.ok / r.n : 0)}">${r.ok}/${r.n}</span></td><td class="l ${r.error && !r.ok ? 'r' : r.status < 400 ? 'g' : 'y'}">${r.ok ? 'HTTP ' + r.status : esc((r.error || '').slice(0, 50))}</td><td class="l mu">${esc(r.source || '')}${r.proxy ? ' · 代理' : ''}</td><td><button class="btn btn-sm btn-ghost btn-danger" data-del="${esc(r.id)}">删除</button></td></tr><tr class="sub" data-sub="${esc(r.id)}" hidden><td colspan="12"></td></tr>`).join('')}</tbody></table>`;
+  $$('#ph-list tr.click').forEach(tr => tr.onclick = e => { if (e.target.closest('button')) return; const sub = $('#ph-list').querySelector(`tr.sub[data-sub="${CSS.escape(tr.dataset.id)}"]`); if (!sub.hidden) { sub.hidden = true; return; } const r = S.pingHist.find(x => x.id === tr.dataset.id);
+    sub.firstChild.innerHTML = `<table><thead><tr><th>#</th><th class="l">IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>HTTP</th><th class="l">状态</th></tr></thead><tbody>${(r.rows || []).map((x, i) => `<tr><td class="mu">${i + 1}</td><td class="l mu">${esc(x.ip || '')}</td><td>${fmtS(x.dns)}</td><td>${fmtS(x.tcp)}</td><td>${fmtS(x.tls)}</td><td class="${cTtft(x.http)}">${fmtS(x.http)}</td><td class="l ${x.error ? 'r' : x.status < 400 ? 'g' : 'y'}">${x.error ? esc(x.error) : 'HTTP ' + x.status}</td></tr>`).join('')}</tbody></table><div class="muted" style="padding:6px 12px">${esc(r.url || '')}${r.server ? ' · ' + esc(r.server) : ''}</div>`; sub.hidden = false; });
+  $$('#ph-list [data-del]').forEach(b => b.onclick = async () => { if (await confirmDlg('删除记录', '确定删除这条诊断记录？')) { await api('/api/ping/history/' + b.dataset.del, { method: 'DELETE' }); toast('已删除', 'ok'); loadPingHistory(); } });
+}
+$('#ph-ep').onchange = renderPingHistory; $('#ph-last').onchange = renderPingHistory; $('#ph-refresh').onclick = loadPingHistory;
+$('#ph-clear').onclick = async () => { const ep = $('#ph-ep').value; if (await confirmDlg('清空诊断历史', ep ? `确定删除端点「${ep}」的全部诊断记录？` : '确定删除全部诊断记录？')) { await api('/api/ping/history' + (ep ? '?endpoint=' + encodeURIComponent(ep) : ''), { method: 'DELETE' }); toast('已清空', 'ok'); loadPingHistory(); } };
+
+// ============================================================ settings page
+function renderSettings() { const d = S.defaults; ['rounds', 'concurrency', 'max_tokens', 'timeout', 'proxy', 'system'].forEach(k => $('#s-' + k).value = d[k] ?? ''); $('#s-preset').value = d.prompt_preset && S.presets[d.prompt_preset] ? d.prompt_preset : 'medium'; $('#s-cfg-path').textContent = S.cfg?.path || '（未创建，保存时生成 ./apitest.yaml）'; $('#s-hist-path').textContent = S.cfg?.history_path || '~/.apitest/history.jsonl'; }
+$('#s-save').onclick = async () => { const d = { ...S.defaults }; ['rounds', 'concurrency', 'max_tokens', 'timeout'].forEach(k => { const v = $('#s-' + k).value; v ? d[k] = Number(v) : delete d[k]; }); ['proxy', 'system'].forEach(k => { const v = $('#s-' + k).value.trim(); v ? d[k] = v : delete d[k]; }); d.prompt_preset = $('#s-preset').value; S.defaults = d;
+  try { const r = await api('/api/config', { method: 'POST', body: JSON.stringify({ defaults: d, endpoints: S.endpoints }) }); S.cfg.path = r.path; toast('已保存默认参数', 'ok'); renderSettings(); } catch (e) { toast('保存失败: ' + e.message, 'err'); } };
+$('#s-raw').onclick = async () => showText('配置文件', await (await fetch('/api/config/raw')).text());
+$('#s-clear-hist').onclick = async () => { if (await confirmDlg('清空历史', '确定删除全部历史测速记录？不可恢复。')) { await api('/api/history', { method: 'DELETE' }); toast('历史已清空', 'ok'); } };
+
+// ============================================================ boot
+applyTheme(store.get('theme', 'auto'));
+loadConfig().then(route).catch(e => { toast('加载配置失败: ' + e.message, 'err'); route(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+[project]
+name = "apitest"
+version = "0.1.0"
+description = "Latency & throughput benchmark for AI APIs: TTFT, tok/s, stability, gateway overhead (OpenAI-compatible / Anthropic / Gemini)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "lining" }]
+keywords = ["llm", "benchmark", "latency", "openai", "anthropic", "gemini", "ttft", "speedtest"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Benchmark",
+    "Topic :: Internet :: WWW/HTTP",
+]
+dependencies = [
+    "httpx>=0.27",
+    "rich>=13.7",
+    "pyyaml>=6.0",
+    "starlette>=0.49.3",
+    "uvicorn>=0.39.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/liningbest/apitest"
+Repository = "https://github.com/liningbest/apitest"
+Issues = "https://github.com/liningbest/apitest/issues"
+
+[project.scripts]
+apitest = "apitest.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apitest"]

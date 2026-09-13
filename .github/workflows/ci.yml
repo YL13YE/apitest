@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install
+        run: uv sync --python ${{ matrix.python-version }}
+      - name: Import check
+        run: uv run python -c "import apitest.cli, apitest.web, apitest.runner"
+      - name: Smoke test against mock server
+        run: |
+          uv run python tests/mock_server.py 8765 &
+          sleep 1
+          uv run apitest run --url http://127.0.0.1:8765/v1 -m mock-fast,mock-slow -n 2 --no-history -q
+          uv run apitest run --url http://127.0.0.1:8765 -p anthropic -m mock-fast -n 1 --no-history -q
+          uv run apitest run --url http://127.0.0.1:8765 -p gemini -m gemini-mock -n 1 --no-history -q
+          uv run apitest run --url http://127.0.0.1:8765/v1 -m mock-fast -n 1 --no-history --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['summaries'][0]['ok']==1"
+          uv run apitest ping --url http://127.0.0.1:8765/v1 -n 1 --no-history
