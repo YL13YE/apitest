@@ -11,7 +11,14 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-TEXT = "人工智能的发展可以追溯到二十世纪五十年代。Artificial intelligence has evolved rapidly since then. " * 6
+TEXT = (
+    "人工智能的发展可以追溯到二十世纪五十年代。1956 年的达特茅斯会议首次提出“人工智能”这一概念，图灵、麦卡锡、明斯基等人奠定了符号推理与机器学习的早期基础。"
+    "此后几十年里，专家系统、神经网络与统计学习方法交替兴起，也经历过两次“AI 寒冬”。\n\n"
+    "进入二十一世纪，算力、数据与深度学习算法的共同进步让语音识别、图像识别取得突破，2012 年 AlexNet 在 ImageNet 上的成绩被视为深度学习时代的开端。"
+    "2017 年 Transformer 架构提出后，大规模预训练语言模型迅速发展，GPT、BERT 等模型让自然语言处理能力大幅提升。\n\n"
+    "近年来，大语言模型开始具备代码生成、多轮对话与工具调用能力，被广泛应用于编程、写作、搜索与客服等场景。"
+    "与此同时，模型的推理延迟、吞吐与稳定性成为工程落地时必须量化的指标，这也是各类测速与评测工具出现的原因。"
+)
 OPTS = {"ttft": 0.15, "chunk_delay": 0.02, "chunks": 40, "fail_rate": 0.0}
 
 
@@ -55,7 +62,7 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(n) or b"{}")
         if random.random() < OPTS["fail_rate"]:
-            return self._json(500, {"error": {"message": "mock random failure"}})
+            return self._json(502, {"error": {"message": "upstream request timeout", "type": "server_error"}})
         model = body.get("model") or self.path.split("/models/")[-1].split(":")[0]
         delay_mult = 3 if "slow" in model else 1
         chunks = _chunks(OPTS["chunks"])

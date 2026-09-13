@@ -200,7 +200,8 @@ pre.raw{background:var(--surface-2);border:1px solid var(--border);border-radius
 .sc-desc{font-size:12px;color:var(--text-2);margin-top:6px}
 .note{border:1px solid var(--amber);border-left-width:3px;background:var(--amber-soft);color:var(--text);padding:8px 12px;font-size:12.5px;border-radius:var(--r);margin:0 0 10px}
 .note div+div{margin-top:3px}
-.lc .m{grid-template-columns:1fr 1fr 1fr}
+.lc .m{grid-template-columns:auto auto auto;justify-content:space-between}
+.lc .m span{white-space:nowrap}
 .est{display:inline-block;font:10px var(--mono);color:var(--amber);border:1px solid var(--amber);padding:0 3px;border-radius:2px;margin-left:4px;vertical-align:1px}
 .base{display:inline-block;font:10px var(--mono);color:var(--accent);border:1px solid var(--accent);padding:0 3px;border-radius:2px;margin-left:6px;vertical-align:1px}
 .sd{color:var(--text-3);font-size:11px;margin-left:3px}
@@ -467,10 +468,11 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if
 // ============================================================ state & router
 const S = { endpoints: {}, defaults: {}, presets: {}, selected: new Set(), run: null, es: null, charts: {}, cards: {}, live: {}, prev: {}, sort: { key: null, asc: true }, lastSnap: null, histRuns: [], histSel: new Set(), modelCache: [], pickerModels: [] };
 function route() {
-  const p = (location.hash.replace('#/', '') || 'run').split('?')[0];
+  const [p0, qs] = (location.hash.replace('#/', '') || 'run').split('?'); const p = p0 || 'run', q = new URLSearchParams(qs || '');
   $$('.page').forEach(s => s.classList.toggle('active', s.dataset.page === p));
   $$('nav a').forEach(a => a.classList.toggle('active', a.dataset.page === p));
-  if (p === 'history') loadHistory();
+  if (p === 'run' && q.get('replay')) replayRun(q.get('replay'), q.get('only'));
+  if (p === 'history') loadHistory().then(() => { if (q.get('show')) showHistory(q.get('show')); });
   if (p === 'endpoints') renderEndpoints();
   if (p === 'ping') { renderPingEps(); loadPingHistory(); }
   if (p === 'settings') renderSettings();
@@ -567,9 +569,25 @@ async function startRun(targetsOverride, optsOverride, silent=false) {
   es.onerror = () => { if (S.run) { es.close(); api(`/api/run/${S.run.id}`).then(onDone).catch(e => toast('连接中断: ' + e.message, 'err')); } };
   return r;
 }
-async function loadPrev(labels) {
+async function loadPrev(labels, excludeId) {
   S.prev = {};
-  try { const runs = await api('/api/history?last=100'); for (const run of runs) for (const s of run.summaries || []) { const l = s.target + '/' + s.model; if (labels.includes(l) && !S.prev[l]) S.prev[l] = { ...s, run_id: run.id, time: run.meta?.time }; } } catch (e) {}
+  try { const runs = await api('/api/history?last=100'); for (const run of runs) { if (run.id === excludeId) continue; for (const s of run.summaries || []) { const l = s.target + '/' + s.model; if (labels.includes(l) && !S.prev[l]) S.prev[l] = { ...s, run_id: run.id, time: run.meta?.time }; } } } catch (e) {}
+}
+async function replayRun(id, only) {
+  let run; try { run = await api('/api/history/' + id); } catch (e) { return toast('记录不存在: ' + e.message, 'err'); }
+  const m = run.meta || {}, results = (run.results || []).slice().sort((a, b) => a.started_at - b.started_at);
+  if (!results.length) return toast('该记录没有逐次明细，无法回放', 'err');
+  if (S.run) return;
+  resetResults();
+  await loadPrev([...new Set(results.map(r => r.target + '/' + r.model))], id);
+  S.run = { id, total: m.rounds || null, results: [], startedAt: Date.now() - (m.elapsed || 0) * 1000 };
+  results.forEach(r => { ensureCard(r.target + '/' + r.model); onResult(r); });
+  // 实时输出面板用每个目标最后一次的输出填充
+  const last = {}; results.forEach(r => { if (r.ok) last[r.target + '/' + r.model] = r; });
+  $('#live-out').innerHTML = '';
+  Object.entries(last).slice(0, 4).forEach(([l, r]) => { const el = document.createElement('div'); el.className = 'lo done'; el.innerHTML = `<div class="h"><b>${esc(l)} #${r.index + 1}</b><span class="st">完成 · ${fmtS(r.total)} · ${r.output_tokens} tok</span></div><pre>${esc(r.text || '')}</pre>`; $('#live-out').appendChild(el); });
+  onDone({ status: m.interrupted ? 'stopped' : 'done', results, summaries: run.summaries || [], ranking: rankOf(run.summaries || []), meta: m, elapsed: m.elapsed || 0, history_id: id });
+  if (only) { const live = only === 'live'; document.querySelector('.grid-2').hidden = true; $('#results').previousElementSibling; ['#kpis', '.grid-live', '#charts'].forEach(sel => { const el = $(sel); if (el) el.hidden = !live; }); ['#podium', '#summary', '#details', '#export'].forEach(sel => { const el = $(sel).closest('.card') || $(sel); el.hidden = live; }); if (live) $('#export').hidden = true; window.scrollTo(0, 0); }
 }
 function resetResults() {
   if (S.es) { S.es.close(); S.es = null; } clearInterval(S.timer);
