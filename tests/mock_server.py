@@ -19,12 +19,31 @@ TEXT = (
     "近年来，大语言模型开始具备代码生成、多轮对话与工具调用能力，被广泛应用于编程、写作、搜索与客服等场景。"
     "与此同时，模型的推理延迟、吞吐与稳定性成为工程落地时必须量化的指标，这也是各类测速与评测工具出现的原因。"
 )
+TEXT_EN = (
+    "The history of artificial intelligence begins in the 1950s. The 1956 Dartmouth workshop coined the term, and pioneers such as "
+    "Turing, McCarthy and Minsky laid the groundwork for symbolic reasoning and early machine learning. Over the following decades, "
+    "expert systems, neural networks and statistical methods rose and fell in turn, and the field went through two so-called AI winters.\n\n"
+    "In the twenty-first century, advances in compute, data and deep learning brought breakthroughs in speech and image recognition; "
+    "AlexNet's 2012 ImageNet result is widely seen as the start of the deep learning era. After the Transformer architecture appeared in "
+    "2017, large pre-trained language models such as GPT and BERT rapidly improved natural language processing.\n\n"
+    "Today large language models write code, hold multi-turn conversations and call tools, and are used for programming, writing, search "
+    "and customer support. Latency, throughput and stability have become metrics that engineering teams must measure, which is why "
+    "benchmarking tools like this one exist."
+)
 OPTS = {"ttft": 0.15, "chunk_delay": 0.02, "chunks": 40, "fail_rate": 0.0}
 
 
-def _chunks(n):
-    step = max(1, len(TEXT) // n)
-    return [TEXT[i:i + step] for i in range(0, len(TEXT), step)][:n]
+def _text_for(body):
+    """请求里没有中文就用英文回答，便于不同语言的演示。"""
+    import re
+    blob = json.dumps(body, ensure_ascii=False)
+    return TEXT if re.search(r"[\u4e00-\u9fff]", blob) else TEXT_EN
+
+
+def _chunks(n, text=None):
+    text = text or TEXT
+    step = max(1, len(text) // n)
+    return [text[i:i + step] for i in range(0, len(text), step)][:n]
 
 
 class H(BaseHTTPRequestHandler):
@@ -65,7 +84,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(502, {"error": {"message": "upstream request timeout", "type": "server_error"}})
         model = body.get("model") or self.path.split("/models/")[-1].split(":")[0]
         delay_mult = 3 if "slow" in model else 1
-        chunks = _chunks(OPTS["chunks"])
+        chunks = _chunks(OPTS["chunks"], _text_for(body))
         if "gemini" in model or "v1beta" in self.path:
             return self._gemini(body, chunks, delay_mult)
         if self.path.endswith("/messages"):

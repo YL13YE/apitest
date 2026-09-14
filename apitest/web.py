@@ -157,12 +157,12 @@ async def index(request: Request) -> Response:
     return HTMLResponse(html.replace("{{VERSION}}", __version__))
 
 
-_ICON_TYPES = {"favicon.svg": "image/svg+xml", "favicon.ico": "image/x-icon", "favicon-192.png": "image/png"}
+_ICON_TYPES = {"favicon.svg": "image/svg+xml", "favicon.ico": "image/x-icon", "favicon-192.png": "image/png", "i18n.js": "application/javascript"}
 
 
 def icon_route(name: str) -> Route:
     async def handler(request: Request) -> Response:
-        return Response((STATIC / name).read_bytes(), media_type=_ICON_TYPES[name], headers={"Cache-Control": "public, max-age=86400"})
+        return Response((STATIC / name).read_bytes(), media_type=_ICON_TYPES[name], headers={"Cache-Control": "no-cache" if name.endswith(".js") else "public, max-age=86400"})
 
     return Route("/" + name, handler)
 
@@ -449,6 +449,7 @@ routes = [
     icon_route("favicon.svg"),
     icon_route("favicon.ico"),
     icon_route("favicon-192.png"),
+    icon_route("i18n.js"),
     Route("/api/config/raw", raw_config),
     Route("/api/history/{run_id}/export", history_export),
     Route("/api/history/{run_id}", history_delete, methods=["DELETE"]),

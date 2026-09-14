@@ -1,6 +1,3 @@
-把界面截图放在这里，README 引用了以下两张：
+Screenshots referenced by the READMEs. `run.png` / `summary.png` are the English UI (used by README.md); `run.zh.png` / `summary.zh.png` are 简体中文 (used by README.zh-CN.md).
 
-- `run.png`：测速页运行中（进度卡片 + 实时输出 + 曲线）
-- `summary.png`：结束后的排行、汇总表与分布图
-
-建议宽度 1600px 左右，浅色主题。
+They are generated from a mock-server run via the replay deep link, e.g. `#/run?replay=<id>&only=live&lang=en`, captured with headless Chrome at 1600px width, 2× scale.

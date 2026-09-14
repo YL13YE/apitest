@@ -8,6 +8,7 @@
 <link rel="alternate icon" href="/favicon.ico">
 <link rel="apple-touch-icon" href="/favicon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/i18n.js"></script>
 <style>
 :root{
   --bg:#f3f2ed;--surface:#fbfaf7;--surface-2:#efede6;--border:#dcd9cf;--border-2:#c4c0b3;
@@ -222,6 +223,7 @@ pre.raw{background:var(--surface-2);border:1px solid var(--border);border-radius
   <div class="top-r">
     <span id="run-indicator" hidden><i></i>测速中</span>
     <span id="cfg-status"></span>
+    <select class="select input-sm" id="lang-sel" data-no-i18n title="Language"><option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en">English</option></select>
     <button class="btn btn-sm" id="theme-btn">深色</button>
   </div>
 </div></header>
@@ -381,7 +383,7 @@ pre.raw{background:var(--surface-2);border:1px solid var(--border);border-radius
       <div class="card"><div class="card-h"><h3>命令行</h3></div><div class="card-b help">
         同一套配置也可以在终端使用：<br>
         <code>apitest run --all -n 5</code> 测所有端点 · <code>apitest run -e 名称:模型 --preset long</code> · <code>apitest ping -e 名称</code> · <code>apitest history</code><br>
-        导出 <code>--export 报告.md</code>，脚本处理 <code>--json</code>。
+        导出 <code>--export report.md</code>，脚本处理 <code>--json</code>。
       </div></div>
     </div>
   </div>
@@ -419,6 +421,9 @@ pre.raw{background:var(--surface-2);border:1px solid var(--border);border-radius
 <dialog id="dlg-text" style="width:760px"><div class="dh"><h3 id="tx-title"></h3><button class="btn btn-ghost btn-sm" id="tx-close">×</button></div><div class="db"><pre class="raw" id="tx-body"></pre></div></dialog>
 
 <script>
+// ============================================================ i18n
+i18nBoot();
+document.getElementById('lang-sel').value = LANG; document.getElementById('lang-sel').onchange = e => setLang(e.target.value);
 // ============================================================ utils
 const $ = (s, el=document) => el.querySelector(s);
 const $$ = (s, el=document) => [...el.querySelectorAll(s)];
@@ -743,15 +748,15 @@ document.addEventListener('click', e => { const td = e.target.closest('td[data-f
 
 // ---------- charts
 const CH_BASE = () => ({ animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } } } });
-function mkLine(canvas, title, yTitle) { const base = CH_BASE(); return new Chart(canvas, { type: 'line', data: { datasets: [] }, options: { ...base, parsing: false, plugins: { ...base.plugins, title: { display: true, text: title, font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { x: { type: 'linear', title: { display: true, text: '第 N 次请求' }, ticks: { stepSize: 1, precision: 0 } }, y: { beginAtZero: true, title: { display: true, text: yTitle } } } } }); }
-function mkBar(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: '平均对比', font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'TTFT ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } }); }
-function mkDist(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: 'TTFT 分布 (min / P50 / P90 / max)', font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } }); }
+function mkLine(canvas, title, yTitle) { const base = CH_BASE(); return new Chart(canvas, { type: 'line', data: { datasets: [] }, options: { ...base, parsing: false, plugins: { ...base.plugins, title: { display: true, text: title, font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { x: { type: 'linear', title: { display: true, text: tr('第 N 次请求') }, ticks: { stepSize: 1, precision: 0 } }, y: { beginAtZero: true, title: { display: true, text: yTitle } } } } }); }
+function mkBar(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: tr('平均对比'), font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'TTFT ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } }); }
+function mkDist(canvas) { const base = CH_BASE(); return new Chart(canvas, { type: 'bar', data: { labels: [], datasets: [] }, options: { ...base, plugins: { ...base.plugins, title: { display: true, text: tr('TTFT 分布 (min / P50 / P90 / max)'), font: { weight: '600', family: getComputedStyle(document.documentElement).getPropertyValue('--sans') } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } }); }
 function initCharts() {
   for (const c of Object.values(S.charts)) if (c.canvas && c.canvas.id !== 'ch-trend') c.destroy();
-  S.charts.ttft = mkLine($('#ch-ttft'), '首字延迟 TTFT', 'ms'); S.charts.tps = mkLine($('#ch-tps'), '输出吞吐', 'tok/s');
+  S.charts.ttft = mkLine($('#ch-ttft'), tr('首字延迟 TTFT'), 'ms'); S.charts.tps = mkLine($('#ch-tps'), tr('输出吞吐'), 'tok/s');
   S.charts.bar = mkBar($('#ch-bar')); S.charts.dist = mkDist($('#ch-dist'));
 }
-function fillBar(ch, sums) { if (!ch) return; ch.data.labels = sums.map(s => s.target + '/' + s.model); ch.data.datasets = [{ label: 'TTFT 均值 (ms)', data: sums.map(s => +(s.ttft.mean * 1000).toFixed(0)), backgroundColor: '#1f6f8bcc', yAxisID: 'y', borderRadius: 0 }, { label: '吞吐 (tok/s)', data: sums.map(s => +s.tps.mean.toFixed(1)), backgroundColor: '#2f855acc', yAxisID: 'y1', borderRadius: 0 }]; ch.update(); }
+function fillBar(ch, sums) { if (!ch) return; ch.data.labels = sums.map(s => s.target + '/' + s.model); ch.data.datasets = [{ label: tr('TTFT 均值 (ms)'), data: sums.map(s => +(s.ttft.mean * 1000).toFixed(0)), backgroundColor: '#1f6f8bcc', yAxisID: 'y', borderRadius: 0 }, { label: tr('吞吐 (tok/s)'), data: sums.map(s => +s.tps.mean.toFixed(1)), backgroundColor: '#2f855acc', yAxisID: 'y1', borderRadius: 0 }]; ch.update(); }
 function fillDist(ch, sums) { if (!ch) return; ch.data.labels = sums.map(s => s.target + '/' + s.model); const c = ['#b8c2cc', '#4a5568', '#c05621', '#c53030']; ch.data.datasets = ['min', 'p50', 'p90', 'max'].map((k, i) => ({ label: k, data: sums.map(s => +(s.ttft[k] * 1000).toFixed(0)), backgroundColor: c[i], borderRadius: 0 })); ch.update(); }
 function fillLines(chT, chP, results) {
   const groups = {}; results.forEach(r => { if (r.warmup) return; const l = r.target + '/' + r.model; (groups[l] = groups[l] || []).push(r); });
@@ -890,11 +895,11 @@ async function showHistory(id) {
     <div class="kpis">${kpiHtml(sums, results, m.elapsed, true)}</div>
     <div class="charts">${results && hasChart ? '<div class="chart"><canvas id="h-ch-ttft"></canvas></div><div class="chart"><canvas id="h-ch-tps"></canvas></div>' : ''}${hasChart ? '<div class="chart"><canvas id="h-ch-bar"></canvas></div><div class="chart"><canvas id="h-ch-dist"></canvas></div>' : ''}</div>
     <div class="podium" id="h-podium"></div>
-    <div class="card"><div class="card-h"><h3>汇总</h3><span class="muted">${results ? '点击行展开每次请求' : ''}</span></div><div class="tw" id="h-sum"></div><div class="legend">TTFT=首个 token 延迟 · tok/s=输出 tokens ÷ 首字后的生成时长 · CV=标准差/均值(越小越稳) · 卡顿=流式相邻 chunk 最长间隔 · ~=token 数为估算 · ↻n=经重试的请求数</div></div>
+    <div class="card"><div class="card-h"><h3>汇总</h3><span class="muted">${results ? '点击行展开每次请求' : ''}</span></div><div class="tw" id="h-sum"></div><div class="legend">TTFT=首个 token（文本或思考）· TTFT 文本=首个可见文本 token · tok/s=输出 tokens ÷ 首个文本 token 之后的时长 · ±=标准差 · CV=标准差/均值 · 卡顿=流式相邻 chunk 最长间隔 · 估=token 数为估算，不参与吞吐排名 · vs 基线=相对基线目标的增量（正数=更慢）· ↻n=经重试</div></div>
     ${results ? `<div class="card"><div class="card-h"><h3>逐次明细</h3><div class="row"><label class="switch"><input type="checkbox" id="h-dt-fail"><span></span>只看失败</label><input class="input input-sm" id="h-dt-search" placeholder="搜索目标 / 内容…"></div></div><div class="tw" id="h-details"></div></div>` : '<div class="muted" style="padding:4px 2px 12px">该记录由旧版本生成，没有保存逐次明细与实时曲线。</div>'}`;
   $('#h-close').onclick = () => { for (const c of Object.values(S.hcharts)) c.destroy(); S.hcharts = {}; el.innerHTML = ''; };
   if (hasChart) { S.hcharts.bar = mkBar($('#h-ch-bar')); fillBar(S.hcharts.bar, sums); S.hcharts.dist = mkDist($('#h-ch-dist')); fillDist(S.hcharts.dist, sums);
-    if (results) { S.hcharts.ttft = mkLine($('#h-ch-ttft'), '首字延迟 TTFT', 'ms'); S.hcharts.tps = mkLine($('#h-ch-tps'), '输出吞吐', 'tok/s'); fillLines(S.hcharts.ttft, S.hcharts.tps, results); } }
+    if (results) { S.hcharts.ttft = mkLine($('#h-ch-ttft'), tr('首字延迟 TTFT'), 'ms'); S.hcharts.tps = mkLine($('#h-ch-tps'), tr('输出吞吐'), 'tok/s'); fillLines(S.hcharts.ttft, S.hcharts.tps, results); } }
   S.curNotes = m.notes || [];
   renderPodium(sums, rankOf(sums), $('#h-podium'));
   renderSummary($('#h-sum'), sums, results, false);
@@ -916,8 +921,8 @@ $('#h-trend-sel').onchange = renderTrend;
 function renderTrend() {
   if (!hasChart) return; const l = $('#h-trend-sel').value; const pts = S.histRuns.filter(r => (r.summaries || []).some(s => s.target + '/' + s.model === l)).map(r => ({ t: r.meta?.time || r.id, s: r.summaries.find(s => s.target + '/' + s.model === l) })).filter(p => p.s.ok > 0).reverse();
   if (S.charts.trend) S.charts.trend.destroy();
-  S.charts.trend = new Chart($('#ch-trend'), { type: 'line', data: { labels: pts.map(p => p.t.slice(5, 16)), datasets: [{ label: 'TTFT 均值 (ms)', data: pts.map(p => +(p.s.ttft.mean * 1000).toFixed(0)), borderColor: '#1f6f8b', backgroundColor: '#1f6f8b', yAxisID: 'y', tension: .2, borderWidth: 1.5, pointRadius: 2 }, { label: '吞吐 (tok/s)', data: pts.map(p => +p.s.tps.mean.toFixed(1)), borderColor: '#2f855a', backgroundColor: '#2f855a', yAxisID: 'y1', tension: .2, borderWidth: 1.5, pointRadius: 2 }] },
-    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: !pts.length, text: '该目标暂无成功记录' } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } });
+  S.charts.trend = new Chart($('#ch-trend'), { type: 'line', data: { labels: pts.map(p => p.t.slice(5, 16)), datasets: [{ label: tr('TTFT 均值 (ms)'), data: pts.map(p => +(p.s.ttft.mean * 1000).toFixed(0)), borderColor: '#1f6f8b', backgroundColor: '#1f6f8b', yAxisID: 'y', tension: .2, borderWidth: 1.5, pointRadius: 2 }, { label: tr('吞吐 (tok/s)'), data: pts.map(p => +p.s.tps.mean.toFixed(1)), borderColor: '#2f855a', backgroundColor: '#2f855a', yAxisID: 'y1', tension: .2, borderWidth: 1.5, pointRadius: 2 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: !pts.length, text: tr('该目标暂无成功记录') } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'tok/s' } } } } });
 }
 
 // ============================================================ models page
@@ -973,7 +978,7 @@ function renderPingHistory() {
     else { const groups = {}; asc.forEach(r => (groups[r.endpoint] = groups[r.endpoint] || []).push(r)); const times = [...new Set(asc.map(r => r.time))]; labels = times.map(t => t.slice(5, 16));
       datasets = Object.entries(groups).map(([n, rs], i) => ({ label: n, data: times.map(t => { const r = rs.find(x => x.time === t); return r && r.ok ? +((r.avg.http || 0) * 1000).toFixed(0) : null; }), borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length], tension: .2, borderWidth: 1.5, pointRadius: 2, spanGaps: true })); }
     $('#ph-chart-wrap').hidden = !recs.length;
-    if (recs.length) S.pingChart = new Chart($('#ph-chart'), { type: 'line', data: { labels, datasets }, options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: true, text: ep ? `${ep} · 各阶段耗时趋势 (ms)` : '各端点 HTTP 耗时趋势 (ms)', font: { weight: '600', family: fam } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } });
+    if (recs.length) S.pingChart = new Chart($('#ph-chart'), { type: 'line', data: { labels, datasets }, options: { animation: false, responsive: true, maintainAspectRatio: false, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, boxHeight: 8, usePointStyle: true, pointStyle: 'rect' } }, title: { display: true, text: tr(ep ? `${ep} · 各阶段耗时趋势 (ms)` : '各端点 HTTP 耗时趋势 (ms)'), font: { weight: '600', family: fam } } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } } });
   }
   if (!recs.length) { $('#ph-list').innerHTML = '<div class="empty">暂无诊断历史</div>'; return; }
   $('#ph-list').innerHTML = `<table><thead><tr><th class="l">时间</th><th class="l">端点</th><th class="l">IP</th><th>DNS</th><th>TCP</th><th>TLS</th><th>HTTP 均值</th><th>HTTP 最大</th><th>成功</th><th class="l">状态</th><th class="l">来源</th><th></th></tr></thead><tbody>${recs.map(r => `<tr class="click" data-id="${esc(r.id)}"><td class="l">${esc(r.time)}</td><td class="l"><b>${esc(r.endpoint)}</b></td><td class="l mu">${esc(r.ip || '-')}</td><td>${fmtS(r.avg.dns)}</td><td>${fmtS(r.avg.tcp)}</td><td>${fmtS(r.avg.tls)}</td><td class="${cTtft(r.avg.http)}">${fmtS(r.avg.http)}</td><td>${fmtS(r.http_max)}</td><td><span class="pill ${cRate(r.n ? r.ok / r.n : 0)}">${r.ok}/${r.n}</span></td><td class="l ${r.error && !r.ok ? 'r' : r.status < 400 ? 'g' : 'y'}">${r.ok ? 'HTTP ' + r.status : esc((r.error || '').slice(0, 50))}</td><td class="l mu">${esc(r.source || '')}${r.proxy ? ' · 代理' : ''}</td><td><button class="btn btn-sm btn-ghost btn-danger" data-del="${esc(r.id)}">删除</button></td></tr><tr class="sub" data-sub="${esc(r.id)}" hidden><td colspan="12"></td></tr>`).join('')}</tbody></table>`;
