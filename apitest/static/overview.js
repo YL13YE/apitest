@@ -143,7 +143,7 @@
       else if(hashSettings().has('effort')&&efforts.includes(hashSettings().get('effort')))$('ov-effort').value=hashSettings().get('effort');
       linkSettings();render();
       $('ov-status').textContent=`更新 ${new Date(response.generated_at*1000).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'})}`;
-    } catch(e) {if(serial===state.request)$('ov-status').textContent='数据加载失败：'+e.message+'；会话过期请刷新登录。';}
+    } catch(e) {if(serial===state.request)$('ov-status').textContent='数据加载失败：'+e.message+(window.APITEST_PUBLIC?'；请稍后重试。':'；会话过期请刷新登录。');}
     finally{if(serial===state.request)$('ov-refresh').disabled=false;}
   }
   function filtered() {
@@ -222,7 +222,7 @@
     const m=v.metrics,a=v.assessment;
     $('ov-detail-title').textContent=label(v)+' · '+v.endpoint;
     $('ov-detail-badges').innerHTML=pill(a.overall)+' '+pill(a.stability)+' '+pill(a.evidence);
-    $('ov-detail-metrics').innerHTML=[['完整耗时 P50',sec(m.total_p50)],['首正文 P50',sec(m.ttfa_p50)],['首正文 P90',m.ttfa_p90==null?'样本不足20次':sec(m.ttfa_p90)],['首正文 P95',m.ttfa_p95==null?'样本不足100次':sec(m.ttfa_p95)],['正文中位速度',num(m.tps_p50)+' tok/s'],['辅助字符速度',num(m.chars_p50)+' 字符/s'],['最长正文停顿',sec(m.max_gap)],['流畅请求占比',pct(m.smooth_rate)],['完整率95%区间',m.complete_interval?m.complete_interval.map(pct).join(' ～ '):'—'],['尾延迟比 P90/P50',num(m.tail_ratio,2)],['稳健波动 MAD/P50',pct(m.robust_cv)],['无法判定体验的请求',m.unmeasured+' 次'],['费用',v.cost==null?'无法估算（不等于免费）':num(v.cost,6)+' '+v.currency]].map(([name,value])=>`<div><span>${name}</span><strong>${esc(value)}</strong></div>`).join('');
+    $('ov-detail-metrics').innerHTML=[['完整耗时 P50',sec(m.total_p50)],['首正文 P50',sec(m.ttfa_p50)],['首正文 P90',m.ttfa_p90==null?'样本不足20次':sec(m.ttfa_p90)],['首正文 P95',m.ttfa_p95==null?'样本不足100次':sec(m.ttfa_p95)],['正文中位速度',num(m.tps_p50)+' tok/s'],['辅助字符速度',num(m.chars_p50)+' 字符/s'],['最长正文停顿',sec(m.max_gap)],['流畅请求占比',pct(m.smooth_rate)],['完整率95%区间',m.complete_interval?m.complete_interval.map(pct).join(' ～ '):'—'],['尾延迟比 P90/P50',num(m.tail_ratio,2)],['稳健波动 MAD/P50',pct(m.robust_cv)],['无法判定体验的请求',m.unmeasured+' 次'],...(state.data.public?[]:[['费用',v.cost==null?'无法估算（不等于免费）':num(v.cost,6)+' '+v.currency]])].map(([name,value])=>`<div><span>${name}</span><strong>${esc(value)}</strong></div>`).join('');
     const notes=[a.overall.detail,a.stability.detail,...v.notes].filter(Boolean);
     $('ov-detail-notes').innerHTML=notes.map(s=>`<li>${esc(s)}</li>`).join('');
     $('ov-errors').textContent=Object.entries(v.errors).map(([key,n])=>key+' × '+n).join('；')||'所选记录中没有接口错误。';

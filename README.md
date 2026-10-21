@@ -200,6 +200,10 @@ uv run apitest ping -e relay -n 3
 uv run apitest presets
 ```
 
+## Public dashboard
+
+Export a selected endpoint as a static dashboard and use the separate publishing script to commit changed public metrics to a display repository. See [the sharing guide](docs/sharing.md) (Chinese) for setup and automatic updates.
+
 ## Remote access
 
 The default listener is `127.0.0.1:8787`. To listen on all interfaces:

@@ -20,6 +20,8 @@ jobs:
         run: uv run python -c "import apitest.cli, apitest.web, apitest.runner"
       - name: Security, accounting and sampling regressions
         run: uv run python -m unittest discover -s tests -v
+      - name: Public dashboard script syntax
+        run: node --check apitest/static/public.js
       - name: Model recommendation regressions
         run: node tests/test_model_picks.cjs
       - name: Monitoring round timing regressions

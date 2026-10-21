@@ -164,6 +164,13 @@ def build_parser() -> argparse.ArgumentParser:
     prices.add_argument("-e", "--endpoint", action="append", required=True, help="应用到指定端点，可多次")
     prices.add_argument("--currency", required=True, choices=("USD", "CNY"), help="定价表币种，价格单位为百万 token")
 
+    export_site = sub.add_parser("export-site", help="导出仅含公开测速指标的静态看板，不调用模型")
+    export_site.add_argument("--endpoint", required=True, help="仅导出此端点的历史数据")
+    export_site.add_argument("--out", required=True, help="空目录或已管理的展示仓库目录")
+    export_site.add_argument("--models", help="可选：允许公开的模型 ID，逗号分隔")
+    export_site.add_argument("--title", default="课题组模型表现")
+    export_site.add_argument("--history", help="历史 JSONL 路径；默认使用 APITEST_HISTORY 或本机历史")
+
     # web
     w = sub.add_parser("web", help="启动本地 Web 图形界面")
     w.add_argument("--host", default="127.0.0.1")
@@ -673,10 +680,28 @@ def cmd_import_prices(args, cfg):
     return 0
 
 
+def cmd_export_site(args, cfg):
+    from .public import export_site
+    from .security import register_secrets
+    for ep in (cfg.get("endpoints") or {}).values():
+        register_secrets(ep.get("api_key"), ep.get("key"), *(ep.get("headers") or {}).values())
+    if args.history:
+        runs=[]
+        for line in Path(args.history).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                runs.append(json.loads(line))
+    else:
+        runs=load_runs()
+    models=[m.strip() for m in args.models.split(",") if m.strip()] if args.models else None
+    result=export_site(args.out,runs,args.endpoint,models,title=args.title)
+    print(json.dumps(result,ensure_ascii=False))
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    handlers = {"run": cmd_run, "models": cmd_models, "ping": cmd_ping, "history": cmd_history, "init": cmd_init, "presets": cmd_presets, "web": cmd_web, "import-prices": cmd_import_prices}
+    handlers = {"run": cmd_run, "models": cmd_models, "ping": cmd_ping, "history": cmd_history, "init": cmd_init, "presets": cmd_presets, "web": cmd_web, "import-prices": cmd_import_prices, "export-site": cmd_export_site}
     try:
         cfg = load_config(find_config(args.config)) if args.cmd not in ("init", "web", "import-prices") else {"defaults": {}, "endpoints": {}}
         rc = handlers[args.cmd](args, cfg)
