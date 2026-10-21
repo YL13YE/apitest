@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+import secrets
+from dataclasses import replace
 from dataclasses import asdict, dataclass, field
 from typing import Awaitable, Callable, Dict, List, Optional
 
@@ -20,6 +22,11 @@ from .providers import (
     parse_nonstream,
     parse_stream,
 )
+from .security import redact
+from .budget import RunControl, validate_options
+from .pricing import usage_cost
+from .scheduling import is_active, next_active
+from .measurements import normalize_result, throughput_issue, output_limit_exceeded
 
 
 @dataclass
@@ -42,6 +49,14 @@ class RunOptions:
     proxy: Optional[str] = None
     http2: bool = False
     keep_text: bool = True
+    sample_interval: float = 0.0  # 每轮所有目标完成后，按起始时刻定点采样
+    budget: Optional[float] = None
+    hourly_budget: Optional[float] = None
+    max_requests: Optional[int] = None  # 所有目标、预热、重试共用
+    cache_mode: str = "cold"
+    monitor_hours: Optional[List[int]] = None  # Daily allowed hours, Asia/Shanghai.
+    usage_bounds: Dict[str, Dict[str, int]] = field(default_factory=dict, repr=False)
+    control: Optional[RunControl] = field(default=None, repr=False, compare=False)
     # 流式进度回调 (label, index, text_so_far, elapsed)，Web 界面用于实时输出
     progress_cb: Optional[Callable[[str, int, str, float], None]] = field(default=None, repr=False, compare=False)
 
@@ -52,6 +67,8 @@ class RequestResult:
     model: str
     provider: str
     index: int
+    currency: str = "USD"
+    effort: Optional[str] = None
     ok: bool = False
     error: str = ""
     error_kind: str = ""  # http / timeout / connect / empty / stream / other
@@ -77,6 +94,16 @@ class RequestResult:
     text_hash: str = ""  # 输出文本 sha1 前 10 位，用于比较两边内容是否一致
     # 每个 chunk 的到达时刻（相对 t0），用于抖动分析
     chunk_times: List[float] = field(default_factory=list)
+    text_chunk_times: List[float] = field(default_factory=list)
+    budget_charge: float = 0.0
+    cost_uncertain: bool = False
+    cost_unknown_reason: str = ""
+    visible_tokens_estimated: bool = False
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    requested_max_tokens: Optional[int] = None
+    requested_limit_field: Optional[str] = None
+    price_multiplier: float = 1.0
 
     @property
     def truncated(self) -> bool:
@@ -86,32 +113,47 @@ class RequestResult:
     def gen_time(self) -> float:
         """生成阶段耗时：流式为首个可见文本 token 之后（不受思考片段是否透传影响）；
         非流式或整段一次性返回时为整体耗时。"""
-        start = self.ttft_text if self.ttft_text > 0 else self.ttft
-        if self.stream and start > 0 and self.chunks > 1 and self.total - start > 0.05:
-            return self.total - start
+        if len(self.text_chunk_times) > 1:
+            return max(self.text_chunk_times[-1] - self.text_chunk_times[0], 1e-6)
         return max(self.total, 1e-6)
 
     @property
     def tps(self) -> float:
-        if not self.ok or self.output_tokens <= 0:
+        if not self.tps_eligible:
             return 0.0
-        return self.output_tokens / self.gen_time
+        return max(0, self.output_tokens - self.reasoning_tokens) / self.gen_time if not self.visible_tokens_estimated else 0.0
+
+    @property
+    def tps_eligible(self) -> bool:
+        return throughput_issue({"ok": self.ok, "stream": self.stream, "text_chunks": len(self.text_chunk_times),
+            "gen_time": self.gen_time, "truncated": self.truncated, "tokens_estimated": self.tokens_estimated,
+            "visible_tokens_estimated": self.visible_tokens_estimated, "output_tokens": self.output_tokens,
+            "reasoning_tokens": self.reasoning_tokens, "output_limit_exceeded": output_limit_exceeded({
+                "output_tokens": self.output_tokens, "tokens_estimated": self.tokens_estimated,
+                "requested_max_tokens": self.requested_max_tokens})}) is None
 
     @property
     def max_gap(self) -> float:
         """流式 chunk 之间的最大停顿（秒）。"""
-        if len(self.chunk_times) < 2:
+        if len(self.text_chunk_times) < 2:
             return 0.0
-        return max(b - a for a, b in zip(self.chunk_times, self.chunk_times[1:]))
+        return max(b - a for a, b in zip(self.text_chunk_times, self.text_chunk_times[1:]))
 
     def to_dict(self) -> Dict:
         d = asdict(self)
         d.pop("chunk_times", None)
+        d.pop("text_chunk_times", None)
         d["tps"] = round(self.tps, 2)
-        d["gen_time"] = round(self.gen_time, 4)
+        d["gen_time"] = self.gen_time
         d["max_gap"] = round(self.max_gap, 4)
         d["truncated"] = self.truncated
-        return d
+        gaps = [b - a for a, b in zip(self.text_chunk_times, self.text_chunk_times[1:])]
+        d["stall_count"] = sum(g > 1 for g in gaps)
+        d["stall_seconds"] = round(sum(g for g in gaps if g > 1), 4)
+        d["chars_per_second"] = round(self.text_chars / self.gen_time, 2) if len(self.text_chunk_times) > 1 else None
+        d["single_chunk"] = len(self.text_chunk_times) == 1
+        d["text_chunks"] = len(self.text_chunk_times)
+        return redact(normalize_result(d))
 
 
 ResultCallback = Callable[[RequestResult], None]
@@ -132,10 +174,17 @@ async def do_request(
     index: int,
     warmup: bool = False,
 ) -> RequestResult:
-    r = RequestResult(target=target.name, model=target.model, provider=target.provider, index=index, stream=opts.stream, warmup=warmup)
+    r = RequestResult(target=target.name, model=target.model, provider=target.provider, index=index, currency=target.currency, price_multiplier=target.price_multiplier, effort=target.effort or "default", stream=opts.stream, warmup=warmup)
     url = chat_url(target, opts.stream)
     headers = auth_headers(target)
     body = build_body(target, opts.prompt, opts.system, opts.max_tokens, opts.temperature, opts.stream)
+    if target.provider == "gemini":
+        r.requested_limit_field = "generationConfig.maxOutputTokens"
+        r.requested_max_tokens = body["generationConfig"]["maxOutputTokens"]
+    else:
+        fields = [key for key in ("max_tokens", "max_completion_tokens", "max_output_tokens") if key in body]
+        r.requested_limit_field = ", ".join(fields)
+        r.requested_max_tokens = min(body[key] for key in fields)
     r.started_at = time.time()
     t0 = time.perf_counter()
     text_parts: List[str] = []
@@ -148,7 +197,7 @@ async def do_request(
             async with client.stream("POST", url, headers=headers, json=body, timeout=opts.timeout) as resp:
                 r.ttfb = time.perf_counter() - t0
                 r.status_code = resp.status_code
-                if resp.status_code >= 400:
+                if resp.status_code >= 300:
                     raw = await resp.aread()
                     r.error = f"HTTP {resp.status_code}: {raw.decode('utf-8', 'replace')[:300].strip()}"
                     r.error_kind = "http"
@@ -165,6 +214,7 @@ async def do_request(
                         r.chunks += 1
                         r.chunk_times.append(now)
                         if ev.kind == "text":
+                            r.text_chunk_times.append(now)
                             if r.ttft_text == 0.0:
                                 r.ttft_text = now
                             text_parts.append(ev.text)
@@ -175,7 +225,7 @@ async def do_request(
                             opts.progress_cb(target.label, index, "".join(text_parts), now)
                     elif ev.kind == "usage" and ev.usage:
                         for k, v in ev.usage.items():
-                            if v:
+                            if v or k.startswith("cache_"):
                                 usage[k] = v
                     elif ev.kind == "stop" and ev.text:
                         r.stop_reason = ev.text
@@ -183,7 +233,7 @@ async def do_request(
             resp = await client.post(url, headers=headers, json=body, timeout=opts.timeout)
             r.ttfb = time.perf_counter() - t0
             r.status_code = resp.status_code
-            if resp.status_code >= 400:
+            if resp.status_code >= 300:
                 r.error = f"HTTP {resp.status_code}: {resp.text[:300].strip()}"
                 r.error_kind = "http"
                 r.total = time.perf_counter() - t0
@@ -210,6 +260,9 @@ async def do_request(
     r.input_tokens = usage.get("input", 0)
     r.output_tokens = usage.get("output", 0)
     r.reasoning_tokens = usage.get("reasoning", 0)
+    r.cache_read_tokens = usage.get("cache_read", 0)
+    r.cache_write_tokens = usage.get("cache_write", 0)
+    r.visible_tokens_estimated = bool(reasoning_chars and not r.reasoning_tokens)
     if r.output_tokens <= 0 and (text or reasoning_chars):
         r.output_tokens = estimate_tokens(text) + int(reasoning_chars * 0.25)
         r.tokens_estimated = True
@@ -218,159 +271,159 @@ async def do_request(
         r.tokens_estimated = True
     if r.error:
         return r
-    if not text and not reasoning_chars:
-        r.error, r.error_kind = "空响应（无任何内容）", "empty"
+    if not text:
+        r.error, r.error_kind = "无正文响应（可能仅思考或预算耗尽）", "empty"
         return r
     r.ok = True
-    if target.price_in is not None or target.price_out is not None:
-        r.cost = (r.input_tokens * (target.price_in or 0) + r.output_tokens * (target.price_out or 0)) / 1e6
+    if target.price_in is not None and target.price_out is not None:
+        r.cost = usage_cost(target, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens)
     return r
 
 
-async def _request_with_retry(client, target, opts, index, warmup=False) -> RequestResult:
-    last: Optional[RequestResult] = None
-    for attempt in range(1, opts.retries + 2):
-        res = await do_request(client, target, opts, index, warmup)
-        res.attempt = attempt
-        if res.ok or res.error_kind == "http" and res.status_code in (400, 401, 403, 404):
-            return res
-        last = res
-        if attempt <= opts.retries:
-            await asyncio.sleep(min(2 ** (attempt - 1), 8))
-    assert last is not None
-    return last
-
-
 def make_client(opts: RunOptions) -> httpx.AsyncClient:
-    limits = httpx.Limits(max_connections=max(opts.concurrency * 2, 10), max_keepalive_connections=max(opts.concurrency, 5))
-    kwargs = dict(timeout=opts.timeout, limits=limits, verify=opts.verify_ssl, http2=opts.http2, follow_redirects=True)
+    kwargs = dict(timeout=opts.timeout, verify=opts.verify_ssl, http2=opts.http2,
+                  follow_redirects=False, trust_env=False,
+                  limits=httpx.Limits(max_connections=max(2, opts.concurrency), max_keepalive_connections=max(2, opts.concurrency)))
     if opts.proxy:
-        try:
-            return httpx.AsyncClient(proxy=opts.proxy, **kwargs)
-        except TypeError:  # httpx < 0.26
-            return httpx.AsyncClient(proxies=opts.proxy, **kwargs)
+        kwargs["proxy"] = opts.proxy
     return httpx.AsyncClient(**kwargs)
 
 
-async def run_target(
-    client: httpx.AsyncClient,
-    target: Target,
-    opts: RunOptions,
-    on_result: Optional[ResultCallback] = None,
-    stop: Optional[asyncio.Event] = None,
-) -> List[RequestResult]:
-    results: List[RequestResult] = []
-    stop = stop or asyncio.Event()
-
-    # 预热：串行执行，不计入统计
-    for i in range(opts.warmup):
-        res = await do_request(client, target, opts, index=-(i + 1), warmup=True)
-        if on_result:
-            on_result(res)
-
-    sem = asyncio.Semaphore(max(1, opts.concurrency))
-    counter = {"i": 0}
-    deadline = time.perf_counter() + opts.duration if opts.duration else None
-
-    async def one(idx: int):
-        async with sem:
-            if stop.is_set():
-                return
-            res = await _request_with_retry(client, target, opts, idx)
-            results.append(res)
-            if on_result:
-                on_result(res)
-            if opts.interval > 0:
-                await asyncio.sleep(opts.interval)
-
-    if deadline is None:
-        await asyncio.gather(*(one(i) for i in range(opts.rounds)))
-    else:
-        async def worker():
-            while not stop.is_set() and time.perf_counter() < deadline:
-                counter["i"] += 1
-                await one(counter["i"] - 1)
-
-        await asyncio.gather(*(worker() for _ in range(max(1, opts.concurrency))))
-    results.sort(key=lambda x: x.index)
-    return results
-
-
-async def run_interleaved(
-    client: httpx.AsyncClient,
-    targets: List[Target],
-    opts: RunOptions,
-    on_result: Optional[ResultCallback],
-    stop: asyncio.Event,
-) -> List[RequestResult]:
-    """交替轮询：每一轮依次给每个目标发请求（并发 c 时每轮每目标发 c 个），把时间漂移摊平。"""
-    results: List[RequestResult] = []
-    for t in targets:
-        for i in range(opts.warmup):
-            res = await do_request(client, t, opts, index=-(i + 1), warmup=True)
-            if on_result:
-                on_result(res)
+async def run_all(targets, opts, on_result=None, on_target_start=None):
+    """One shared budget and deadline, including warmups and every retry attempt."""
+    validate_options(opts)
+    if not targets:
+        raise ValueError("No targets")
+    guard = opts.control = RunControl(targets, opts)
+    results = []
+    start = time.monotonic()
+    deadline = start + opts.duration if opts.duration else None
+    sem = asyncio.Semaphore(opts.concurrency)
     counters = {t.label: 0 for t in targets}
-    deadline = time.perf_counter() + opts.duration if opts.duration else None
-    c = max(1, opts.concurrency)
 
-    async def one(t: Target) -> None:
-        idx = counters[t.label]
-        counters[t.label] += 1
-        res = await _request_with_retry(client, t, opts, idx)
-        results.append(res)
-        if on_result:
-            on_result(res)
+    def expired():
+        return deadline is not None and time.monotonic() >= deadline
 
-    while not stop.is_set():
-        if deadline is None and all(counters[t.label] >= opts.rounds for t in targets):
-            break
-        if deadline is not None and time.perf_counter() >= deadline:
-            break
-        for t in targets:
-            if stop.is_set():
-                break
-            remaining = c if deadline is not None else min(c, opts.rounds - counters[t.label])
-            if remaining <= 0:
-                continue
-            await asyncio.gather(*(one(t) for _ in range(remaining)))
-            if opts.interval > 0:
-                await asyncio.sleep(opts.interval)
-    results.sort(key=lambda x: (x.target, x.model, x.index))
-    return results
+    async def pause(seconds):
+        if deadline is not None:
+            seconds = min(seconds, max(0, deadline - time.monotonic()))
+        if seconds > 0:
+            await asyncio.sleep(seconds)
 
+    async def wait_for_active_window():
+        while not expired():
+            now = time.time()
+            if is_active(now, opts.monitor_hours):
+                guard.phase, guard.next_sample_at = "sampling", None
+                return True
+            scheduled = next_active(now, opts.monitor_hours)
+            guard.phase, guard.next_sample_at = "waiting", scheduled
+            await pause(min(scheduled - now, 30))
+        return False
 
-async def run_all(
-    targets: List[Target],
-    opts: RunOptions,
-    on_result: Optional[ResultCallback] = None,
-    on_target_start: Optional[Callable[[Target], None]] = None,
-) -> List[RequestResult]:
-    all_results: List[RequestResult] = []
-    stop = asyncio.Event()
-    order = "parallel" if opts.parallel_targets else (opts.order or "interleaved")
-    if len(targets) < 2:
-        order = "sequential"
     async with make_client(opts) as client:
-        try:
-            if order == "interleaved":
-                for t in targets:
-                    if on_target_start:
-                        on_target_start(t)
-                all_results.extend(await run_interleaved(client, targets, opts, on_result, stop))
-            elif order == "parallel":
-                for t in targets:
-                    if on_target_start:
-                        on_target_start(t)
-                groups = await asyncio.gather(*(run_target(client, t, opts, on_result, stop) for t in targets))
-                for g in groups:
-                    all_results.extend(g)
+        async def request(target, index, warmup=False):
+            for attempt in range(1, opts.retries + 2):
+                async with sem:
+                    if expired() or not is_active(time.time(), opts.monitor_hours):
+                        return
+                    ticket = await guard.reserve(target)
+                    if ticket is None:
+                        return
+                    request_opts = opts
+                    if opts.cache_mode == "cold":
+                        prefix = "[benchmark nonce " + secrets.token_hex(12) + "]\n"
+                        request_opts = replace(opts, system=prefix + (opts.system or ""))
+                    res = RequestResult(target=target.name, model=target.model, provider=target.provider, index=index, currency=target.currency, price_multiplier=target.price_multiplier, effort=target.effort or "default", stream=opts.stream, warmup=warmup, started_at=time.time())
+                    began = time.monotonic()
+                    timeout = opts.timeout if deadline is None else min(opts.timeout, max(.001, deadline - time.monotonic()))
+                    try:
+                        res = await asyncio.wait_for(do_request(client, target, request_opts, index, warmup), timeout)
+                    except asyncio.TimeoutError:
+                        res.error, res.error_kind = "请求总耗时超时", "timeout"
+                        res.total = time.monotonic() - began
+                    except asyncio.CancelledError:
+                        res.error, res.error_kind = "请求已取消，费用未知", "cancelled"
+                        res.total = time.monotonic() - began
+                        await guard.settle(ticket, res)
+                        if on_result:
+                            on_result(res)
+                        raise
+                    except Exception as e:
+                        res.error, res.error_kind = str(e), "other"
+                        res.total = time.monotonic() - began
+                    res.attempt = attempt
+                    res.text, res.error = redact(res.text), redact(res.error)
+                    await guard.settle(ticket, res)
+                    if not warmup:
+                        results.append(res)
+                    if on_result:
+                        on_result(res)
+                if res.ok or warmup or res.status_code in (400, 401, 403, 404) or expired():
+                    return
+                if attempt <= opts.retries:
+                    await pause(min(2 ** (attempt - 1), 8))
+
+        await wait_for_active_window()
+        for target in targets:
+            if on_target_start:
+                on_target_start(target)
+            for i in range(opts.warmup):
+                await request(target, -(i + 1), True)
+
+        if opts.sample_interval:
+            tick = 0
+            while not expired():
+                if not await wait_for_active_window():
+                    break
+                # Rotate first target each round; skip missed ticks instead of catching up.
+                ordered = targets[tick % len(targets):] + targets[:tick % len(targets)]
+                for target in ordered:
+                    if expired():
+                        break
+                    await request(target, counters[target.label])
+                    counters[target.label] += 1
+                if guard.stop_reason in ("budget", "max_requests", "reported_cost_exceeded_reservation"):
+                    break
+                tick = max(tick + 1, int((time.monotonic() - start) // opts.sample_interval) + 1)
+                delay = start + tick * opts.sample_interval - time.monotonic()
+                due = next_active(time.time() + max(0, delay), opts.monitor_hours)
+                guard.phase, guard.next_sample_at = "waiting", due
+                # Recheck the clock after long idle periods; never catch up missed rounds.
+                while not expired() and time.time() < due:
+                    await pause(min(due - time.time(), 30))
+        else:
+            order = "parallel" if opts.parallel_targets else opts.order
+            async def target_loop(target):
+                while not expired() and (deadline is not None or counters[target.label] < opts.rounds):
+                    before = guard.attempts
+                    idx = counters[target.label]
+                    counters[target.label] += 1
+                    await request(target, idx)
+                    if guard.attempts == before or guard.stop_reason:
+                        break
+                    await pause(opts.interval)
+            if order == "parallel":
+                await asyncio.gather(*(target_loop(t) for t in targets))
+            elif order == "sequential":
+                for target in targets:
+                    await target_loop(target)
+                    if expired() or guard.stop_reason:
+                        break
             else:
-                for t in targets:
-                    if on_target_start:
-                        on_target_start(t)
-                    all_results.extend(await run_target(client, t, opts, on_result, stop))
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            stop.set()
-            raise
-    return all_results
+                while not expired() and (deadline is not None or any(counters[t.label] < opts.rounds for t in targets)):
+                    before = guard.attempts
+                    for target in targets:
+                        if expired() or guard.stop_reason:
+                            break
+                        count = opts.concurrency if deadline is not None else min(opts.concurrency, opts.rounds - counters[target.label])
+                        first = counters[target.label]
+                        counters[target.label] += max(0, count)
+                        await asyncio.gather(*(request(target, first + i) for i in range(max(0, count))))
+                        await pause(opts.interval)
+                    if guard.attempts == before or guard.stop_reason:
+                        break
+    if not guard.stop_reason:
+        guard.stop_reason = "duration" if expired() else "rounds"
+    guard.phase, guard.next_sample_at = "finished", None
+    return results

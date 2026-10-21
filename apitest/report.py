@@ -17,6 +17,7 @@ from rich.text import Text
 
 from .metrics import Summary, rank, sparkline
 from .runner import RequestResult
+from .security import private_write, redact
 
 # ---------------------------------------------------------------------------
 # 格式化
@@ -35,10 +36,10 @@ def fmt_n(x: float, digits: int = 1) -> str:
     return f"{x:.{digits}f}"
 
 
-def fmt_cost(x: Optional[float]) -> str:
+def fmt_cost(x: Optional[float], currency: str = "USD") -> str:
     if x is None:
         return "-"
-    return f"${x:.5f}" if x < 0.01 else f"${x:.4f}"
+    return f"{x:.6f} {currency}"
 
 
 def color_ttft(x: float) -> str:
@@ -73,6 +74,7 @@ class LiveBoard:
         self.show_output = show_output
         self.per_target_total = per_target_total
         self.results: List[RequestResult] = []
+        self.attempts: List[RequestResult] = []
         self.by_target: Dict[str, List[RequestResult]] = defaultdict(list)
         self.last_error: Dict[str, str] = {}
         self.progress = Progress(
@@ -94,6 +96,7 @@ class LiveBoard:
         self.tasks[label] = self.progress.add_task(label, total=self.per_target_total)
 
     def on_result(self, r: RequestResult) -> None:
+        self.attempts.append(r)
         label = f"{r.target}/{r.model}"
         self.start_target(label)
         if r.warmup:
@@ -167,7 +170,7 @@ class LiveBoard:
 # ---------------------------------------------------------------------------
 
 SORT_KEYS = {
-    "ttft": lambda s: (s.ttft.mean if s.ttft.n else float("inf")),
+    "ttft": lambda s: (s.ttft_text.p50 if s.ttft_text.n else float("inf")),
     "tps": lambda s: -(s.tps.mean if s.tps.n else 0),
     "total": lambda s: (s.total.mean if s.total.n else float("inf")),
     "success": lambda s: (-s.success_rate, s.total.mean),
@@ -261,7 +264,7 @@ def summary_table(summaries: List[Summary], title: str = "测速汇总") -> Tabl
         if show_gap:
             row.append(fmt_s(s.max_gap.max) if s.max_gap.n else "-")
         if show_cost:
-            row.append(fmt_cost(s.cost_total))
+            row.append(fmt_cost(s.cost_total, s.currency))
         tb.add_row(*row)
     return tb
 
@@ -320,7 +323,7 @@ def ranking_panel(summaries: List[Summary]) -> Optional[Panel]:
     r = rank(summaries)
     rows = []
     if r["ttft"]:
-        rows.append(f"⚡ 最快首字   [bold]{r['ttft'].label}[/]  {fmt_s(r['ttft'].ttft.mean)}")
+        rows.append(f"⚡ 最快首正文 [bold]{r['ttft'].label}[/]  {fmt_s(r['ttft'].ttft_text.p50)}")
     if r["tps"]:
         rows.append(f"🚀 最高吞吐   [bold]{r['tps'].label}[/]  {r['tps'].tps.mean:.1f} tok/s")
     if r["total"]:
@@ -346,27 +349,33 @@ def legend_text() -> Text:
 
 
 def build_payload(meta: Dict[str, Any], summaries: List[Summary], results: List[RequestResult]) -> Dict[str, Any]:
-    return {
+    from .metrics import hourly_rows
+    return redact({
         "meta": meta,
         "summaries": [s.to_dict() for s in summaries],
-        "results": [r.to_dict() for r in results if not r.warmup],
-    }
+        "results": [r.to_dict() for r in results],
+        "hourly": hourly_rows(results),
+    })
 
 
 def to_csv(results: List[RequestResult]) -> str:
     buf = io.StringIO()
     cols = [
         "index", "target", "model", "provider", "ok", "status_code", "error_kind", "error", "ttfb", "ttft", "ttft_text", "total",
-        "gen_time", "input_tokens", "output_tokens", "reasoning_tokens", "tokens_estimated", "tps", "chunks", "max_gap", "cost", "started_at", "attempt",
+        "gen_time", "requested_max_tokens", "requested_limit_field", "output_limit_exceeded", "tps_issue", "tps_note", "input_tokens", "output_tokens", "reasoning_tokens", "tokens_estimated", "tps", "chunks", "max_gap", "cost", "started_at", "attempt", "warmup", "currency", "price_multiplier", "budget_charge", "cost_uncertain", "cost_unknown_reason", "stall_count", "chars_per_second", "tps_eligible",
     ]
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
     for r in results:
         d = r.to_dict() if hasattr(r, "to_dict") else dict(r)
-        if d.get("warmup"):
-            continue
         for k in ("ttfb", "ttft", "ttft_text", "total"):
             d[k] = round(d.get(k) or 0, 4)
+        for key, value in d.items():
+            if isinstance(value, str):
+                value = redact(value)
+                if value.lstrip().startswith(("=", "+", "-", "@")) or value.startswith(("\t", "\r", "\n")):
+                    value = "'" + value
+                d[key] = value
         w.writerow(d)
     return buf.getvalue()
 
@@ -385,7 +394,7 @@ def to_markdown(meta: Dict[str, Any], summaries: List[Summary]) -> str:
         est = "~" if s.tokens_estimated else ""
         lines.append(
             f"| {i} | {s.target} | {s.model} | {s.ok}/{s.n} | {fmt_s(s.ttft.mean)} | {fmt_s(s.ttft.p90)} | {fmt_s(s.total.mean)} | "
-            f"{est}{s.out_tokens.mean:.0f} | {fmt_n(s.tps.mean)} | {s.ttft.cv * 100:.0f}% | {fmt_cost(s.cost_total)} |"
+            f"{est}{s.out_tokens.mean:.0f} | {fmt_n(s.tps.mean)} | {s.ttft.cv * 100:.0f}% | {fmt_cost(s.cost_total, s.currency)} |"
         )
     errs = [(s.label, m, n) for s in summaries for m, n in s.errors.items()]
     if errs:
@@ -393,6 +402,9 @@ def to_markdown(meta: Dict[str, Any], summaries: List[Summary]) -> str:
         for label, m, n in errs:
             lines.append(f"- **{label}** ×{n}: {m}")
     lines.append("")
+    if meta.get("budget"):
+        lines.append("- 预算与请求统计: " + json.dumps(meta["budget"], ensure_ascii=False))
+        lines.append("- 费用为估算；失败或用量不全保留预留额，实际账单以服务商为准。")
     return "\n".join(lines)
 
 
@@ -406,8 +418,7 @@ def export(path: str, meta: Dict[str, Any], summaries: List[Summary], results: L
         content = to_markdown(meta, summaries)
     else:
         raise ValueError(f"不支持的导出格式: {path}（支持 .json / .csv / .md）")
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(content)
+    private_write(path, redact(content))
 
 
 def now_str() -> str:

@@ -7,6 +7,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from .security import private_write, redact, safe_url
 
 HISTORY_PATH = Path(os.environ.get("APITEST_HISTORY", str(Path.home() / ".apitest" / "history.jsonl")))
 
@@ -18,14 +19,14 @@ def _slim(r: Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
-def save_run(meta: Dict[str, Any], summaries: List[Dict[str, Any]], results: Optional[List[Dict[str, Any]]] = None) -> str:
+def save_run(meta: Dict[str, Any], summaries: List[Dict[str, Any]], results: Optional[List[Dict[str, Any]]] = None, run_id: Optional[str] = None) -> str:
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    run_id = run_id or time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     rec = {"id": run_id, "meta": meta, "summaries": summaries}
     if results:
-        rec["results"] = [_slim(r) for r in results if not r.get("warmup")]
-    with open(HISTORY_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        rec["results"] = [_slim(r) for r in results]
+    records = [r for r in load_runs() if r.get("id") != run_id]
+    _write_jsonl(HISTORY_PATH, records + [rec])
     return run_id
 
 
@@ -80,9 +81,7 @@ def _load_jsonl(path: Path) -> List[Dict[str, Any]]:
 
 
 def _write_jsonl(path: Path, recs: List[Dict[str, Any]]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        for r in recs:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    private_write(path, "".join(json.dumps(redact(r), ensure_ascii=False) + "\n" for r in recs))
 
 
 def make_ping_record(endpoint: str, url: str, rows: List[Dict[str, Any]], source: str = "cli", proxy: Optional[str] = None) -> Dict[str, Any]:
@@ -96,11 +95,11 @@ def make_ping_record(endpoint: str, url: str, rows: List[Dict[str, Any]], source
         "id": time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4],
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         "endpoint": endpoint,
-        "url": url,
+        "url": safe_url(url),
         "host": rows[0].get("host", "") if rows else "",
         "ip": next((r.get("ip") for r in rows if r.get("ip")), ""),
         "source": source,
-        "proxy": proxy or None,
+        "proxy": safe_url(proxy) if proxy else None,
         "n": len(rows),
         "ok": len(oks),
         "avg": {k: avg(k) for k in ("dns", "tcp", "tls", "http")},
@@ -114,8 +113,7 @@ def make_ping_record(endpoint: str, url: str, rows: List[Dict[str, Any]], source
 
 def save_ping(rec: Dict[str, Any]) -> str:
     PING_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(PING_HISTORY_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    _write_jsonl(PING_HISTORY_PATH, _load_jsonl(PING_HISTORY_PATH) + [rec])
     return rec["id"]
 
 
@@ -147,7 +145,5 @@ def delete_run(run_id: str) -> bool:
     keep = [r for r in runs if r.get("id") != run_id]
     if len(keep) == len(runs):
         return False
-    with open(HISTORY_PATH, "w", encoding="utf-8") as f:
-        for r in keep:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    _write_jsonl(HISTORY_PATH, keep)
     return True

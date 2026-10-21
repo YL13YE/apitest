@@ -42,6 +42,10 @@ from .report import (
     summary_table,
 )
 from .runner import RunOptions, run_all
+from .budget import RunControl, validate_options
+from .evaluation import scenario_metadata
+from .security import private_write, redact
+from .pricing import parse_price_table
 
 console = Console()
 err_console = Console(stderr=True)
@@ -95,6 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("-c", "--concurrency", type=int, help="并发数（默认 1）")
     g.add_argument("--warmup", type=int, help="预热请求数，不计入统计（默认 0）")
     g.add_argument("--duration", type=float, metavar="SEC", help="持续压测秒数，设置后忽略 -n")
+    g.add_argument("--hours", type=float, help="持续小时数，与 --duration 二选一")
+    g.add_argument("--sample-minutes", type=float, help="每轮所有目标的采样周期（分钟），跳过错过的周期")
+    g.add_argument("--budget", type=float, help="总预算，币种同端点价格；未知用量保留预留费用")
+    g.add_argument("--hourly-budget", type=float, help="每个运行小时的预算上限")
+    g.add_argument("--max-requests", type=int, help="整个任务的最大请求数，包含预热及重试")
+    g.add_argument("--cache-mode", choices=("cold", "warm", "as-is"), help="冷缓存随机前缀 / 固定前缀复用 / 原请求")
+    g.add_argument("--plan", action="store_true", help="仅显示请求与预算计划，不调用 API")
     g.add_argument("--interval", type=float, help="每次请求之间的间隔秒数")
     g.add_argument("--timeout", type=float, help="单次请求超时秒数（默认 120）")
     g.add_argument("--retries", type=int, help="失败重试次数（默认 0）")
@@ -148,11 +159,19 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--force", action="store_true", help="覆盖已有文件")
     sub.add_parser("presets", help="列出内置提示词预设")
 
+    prices = sub.add_parser("import-prices", help="导入中转站模型定价 JSON（不发起请求）")
+    prices.add_argument("file", help="version: 1 的模型定价表")
+    prices.add_argument("-e", "--endpoint", action="append", required=True, help="应用到指定端点，可多次")
+    prices.add_argument("--currency", required=True, choices=("USD", "CNY"), help="定价表币种，价格单位为百万 token")
+
     # web
     w = sub.add_parser("web", help="启动本地 Web 图形界面")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--port", type=int, default=8787)
     w.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+    w.add_argument("--password-file", help="非回环监听的访问密码文件；默认 ~/.apitest/web-password，不存在时自动生成")
+    w.add_argument("--ssl-certfile", help="可选 HTTPS 证书文件")
+    w.add_argument("--ssl-keyfile", help="可选 HTTPS 私钥文件")
     return p
 
 
@@ -225,6 +244,8 @@ def pick(*vals, default=None):
 def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     d = cfg.get("defaults") or {}
     targets = get_targets(args, cfg)
+    if args.hours is not None and args.duration is not None:
+        raise ValueError("--hours 和 --duration 不能同时设置")
 
     preset_name = pick(args.preset, d.get("prompt_preset"), default="medium")
     preset = PRESETS[preset_name]
@@ -248,14 +269,30 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         warmup=int(pick(args.warmup, d.get("warmup"), default=0)),
         timeout=float(pick(args.timeout, d.get("timeout"), default=120)),
         interval=float(pick(args.interval, d.get("interval"), default=0)),
-        duration=args.duration,
+        duration=args.hours * 3600 if args.hours is not None else pick(args.duration, d.get("duration")),
         retries=int(pick(args.retries, d.get("retries"), default=0)),
         parallel_targets=args.parallel_targets or bool(d.get("parallel_targets")),
         order=pick(args.order, d.get("order"), default="interleaved"),
         verify_ssl=not args.insecure,
         proxy=pick(args.proxy, d.get("proxy"), os.environ.get("APITEST_PROXY")),
         http2=args.http2,
+        sample_interval=float(pick(args.sample_minutes, d.get("sample_minutes"), default=0)) * 60,
+        budget=pick(args.budget, d.get("budget")),
+        hourly_budget=pick(args.hourly_budget, d.get("hourly_budget")),
+        max_requests=pick(args.max_requests, d.get("max_requests")),
+        cache_mode=pick(args.cache_mode, d.get("cache_mode"), default="cold"),
     )
+    validate_options(opts)
+    planned = RunControl(targets, opts)
+    if args.plan:
+        import math
+        rounds = math.ceil(opts.duration / opts.sample_interval) if opts.duration and opts.sample_interval else (None if opts.duration else opts.rounds)
+        attempts = (rounds * (opts.retries + 1) + opts.warmup) * len(targets) if rounds is not None else opts.max_requests
+        if attempts is not None and opts.max_requests is not None:
+            attempts = min(attempts, opts.max_requests)
+        reservations = {t.label: (planned.reservations[t.label] if t.price_in is not None and t.price_out is not None else None) for t in targets}
+        print(json.dumps({"api_calls_made": 0, "targets": [t.label for t in targets], "duration_seconds": opts.duration, "planned_attempts_upper_bound": attempts, "per_request_reservation": reservations, "pricing_complete": all(v is not None for v in reservations.values()), "limits": planned.snapshot(), "note": "null 费用表示未配置价格，不能视为免费。预留采用保守字节上界；实际账单由服务商决定；高思考档位需足够输出上限。"}, ensure_ascii=False, indent=2))
+        return 0
     if opts.rounds <= 0 and not opts.duration:
         raise ValueError("-n 必须大于 0")
 
@@ -271,9 +308,16 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     )
     started = time.time()
     interrupted = False
+    checkpoint_id = None
+
+    def on_result(result):
+        nonlocal checkpoint_id
+        board.on_result(result)
+        if not args.no_history and board.attempts:
+            checkpoint_id = save_run({"time": now_str(), "status": "running", "targets": [t.label for t in targets], "budget": opts.control.snapshot() if opts.control else {}, **scenario_metadata(opts, preset_label, targets)}, [s.to_dict() for s in summarize(board.attempts)], [r.to_dict() for r in board.attempts], checkpoint_id)
 
     async def go():
-        return await run_all(targets, opts, on_result=board.on_result, on_target_start=lambda t: board.start_target(t.label))
+        return await run_all(targets, opts, on_result=on_result, on_target_start=lambda t: board.start_target(t.label))
 
     try:
         if ui and not args.quiet:
@@ -286,7 +330,7 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         err_console.print("\n[yellow]已中断，展示已完成部分的结果…[/]")
 
     order = {t.label: i for i, t in enumerate(targets)}
-    results = sorted(board.results, key=lambda r: (order.get(f"{r.target}/{r.model}", 999), r.index))
+    results = sorted(board.attempts, key=lambda r: (order.get(f"{r.target}/{r.model}", 999), r.index))
     summaries = sort_summaries(summarize(results), args.sort)
     from .metrics import apply_baseline, comparability_notes
 
@@ -312,10 +356,19 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         "interrupted": interrupted,
         "targets": [t.label for t in targets],
         "version": __version__,
+        "sample_interval": opts.sample_interval,
+        "cache_mode": opts.cache_mode,
+        "budget": opts.control.snapshot() if opts.control else {},
+        "status": "stopped" if interrupted else "done",
+        **scenario_metadata(opts, preset_label, targets),
     }
 
-    if not summaries:
-        err_console.print("[red]没有任何结果。[/]")
+    if not results:
+        reason = opts.control.stop_reason if opts.control else "unknown"
+        err_console.print(f"[red]没有发出请求：{reason}。请检查单次费用预留、预算和时限。[/]")
+        if args.json:
+            from .report import build_payload
+            print(json.dumps(build_payload(meta, [], []), ensure_ascii=False, indent=2))
         return 1
 
     if ui:
@@ -340,7 +393,7 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
 
     if not args.no_history:
         try:
-            run_id = save_run(meta, [s.to_dict() for s in summaries], [r.to_dict() for r in results if not r.warmup])
+            run_id = save_run(meta, [s.to_dict() for s in summaries], [r.to_dict() for r in results], checkpoint_id)
             if ui:
                 console.print(f"[dim]历史记录 ID: {run_id}（apitest history --show {run_id[:15]}）[/]")
         except OSError as e:
@@ -352,7 +405,7 @@ def cmd_run(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
         print(json.dumps(build_payload(meta, summaries, results), ensure_ascii=False, indent=2))
 
     any_fail = any(s.ok == 0 for s in summaries)
-    return 2 if any_fail else 0
+    return 2 if any_fail or not summaries else 0
 
 
 def _print_run_header(targets: List[Target], opts: RunOptions, preset_label: Optional[str]) -> None:
@@ -382,11 +435,11 @@ def cmd_models(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     for t in targets:
         url = models_url(t)
         try:
-            with httpx.Client(timeout=30, verify=not args.insecure, follow_redirects=True, **({"proxy": args.proxy} if args.proxy else {})) as c:
+            with httpx.Client(timeout=30, verify=not args.insecure, follow_redirects=False, trust_env=False, **({"proxy": args.proxy} if args.proxy else {})) as c:
                 t0 = time.perf_counter()
                 resp = c.get(url, headers=auth_headers(t))
                 dt = time.perf_counter() - t0
-            if resp.status_code >= 400:
+            if resp.status_code >= 300:
                 raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
             models = parse_models(t.provider, resp.json())
         except Exception as e:  # noqa: BLE001
@@ -568,7 +621,7 @@ def cmd_init(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     if p.exists() and not args.force:
         err_console.print(f"[yellow]{p} 已存在，使用 --force 覆盖[/]")
         return 1
-    p.write_text(EXAMPLE_CONFIG, encoding="utf-8")
+    private_write(p, EXAMPLE_CONFIG)
     console.print(f"[green]已生成 {p}[/]，请填入 base_url / api_key / models 后运行: apitest run --all")
     return 0
 
@@ -591,16 +644,41 @@ def cmd_presets(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
 def cmd_web(args: argparse.Namespace, cfg: Dict[str, Any]) -> int:
     from .web import serve
 
-    serve(host=args.host, port=args.port, open_browser=not args.no_open, config_path=args.config)
+    serve(host=args.host, port=args.port, open_browser=not args.no_open, config_path=args.config, password_file=args.password_file, ssl_certfile=args.ssl_certfile, ssl_keyfile=args.ssl_keyfile)
+    return 0
+
+
+def cmd_import_prices(args, cfg):
+    import yaml
+    path = find_config(args.config)
+    if path is None:
+        raise ValueError("请先配置端点，再导入定价表")
+    # Read the raw config so ${ENV} credentials stay references after saving.
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    endpoints = raw.get("endpoints") or {}
+    prices = parse_price_table(json.loads(Path(args.file).read_text(encoding="utf-8-sig")))
+    for name in args.endpoint:
+        if name not in endpoints:
+            raise ValueError("配置中没有端点: " + name)
+        ep = endpoints[name]
+        if ep.get("price") and str(ep.get("currency") or "USD").upper() != args.currency:
+            raise ValueError("端点原有价格币种不同，请先清理或转换原有价格")
+    for name in dict.fromkeys(args.endpoint):
+        ep = endpoints[name]
+        raw.setdefault("price_catalogs", {})[name] = {"base_url": ep.get("base_url", ep.get("url", "")),
+            "provider": ep.get("provider", ""), "currency": args.currency, "price": prices}
+        ep["currency"] = args.currency
+    private_write(path, yaml.safe_dump(raw, allow_unicode=True, sort_keys=False))
+    console.print(f"已导入 {len(prices)} 个模型价格到 {len(set(args.endpoint))} 个端点，币种 {args.currency} / 百万 token；仅按模型 ID 精确匹配。")
     return 0
 
 
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    handlers = {"run": cmd_run, "models": cmd_models, "ping": cmd_ping, "history": cmd_history, "init": cmd_init, "presets": cmd_presets, "web": cmd_web}
+    handlers = {"run": cmd_run, "models": cmd_models, "ping": cmd_ping, "history": cmd_history, "init": cmd_init, "presets": cmd_presets, "web": cmd_web, "import-prices": cmd_import_prices}
     try:
-        cfg = load_config(find_config(args.config)) if args.cmd not in ("init", "web") else {"defaults": {}, "endpoints": {}}
+        cfg = load_config(find_config(args.config)) if args.cmd not in ("init", "web", "import-prices") else {"defaults": {}, "endpoints": {}}
         rc = handlers[args.cmd](args, cfg)
     except (ValueError, FileNotFoundError) as e:
         err_console.print(f"[red]错误:[/] {e}")

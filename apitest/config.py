@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import copy
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from .providers import PROVIDERS, Target, detect_provider
+from .pricing import apply_price_catalogs
 
 CONFIG_CANDIDATES = [
     Path("apitest.yaml"),
@@ -34,6 +36,7 @@ endpoints:
     base_url: https://api.openai.com/v1
     api_key: ${OPENAI_API_KEY}
     models: [gpt-4o-mini, gpt-4o]
+    price_multiplier: 1           # 计费倍率；例如0.16；单价已是折后价时保持1
     price:                        # 可选：USD / 1M tokens [输入, 输出]，用于估算费用
       gpt-4o-mini: [0.15, 0.60]
       gpt-4o: [2.50, 10.00]
@@ -96,6 +99,7 @@ def load_config(path: Optional[Path]) -> Dict[str, Any]:
     data = expand_env(data)
     data.setdefault("defaults", {})
     data.setdefault("endpoints", {})
+    data["endpoints"] = apply_price_catalogs(data["endpoints"], data.get("price_catalogs"))
     return data
 
 
@@ -108,23 +112,40 @@ def _split_models(spec: Any) -> List[str]:
 
 
 def endpoint_targets(name: str, ep: Dict[str, Any], models: Optional[List[str]] = None) -> List[Target]:
+    efforts = ep.get("efforts")
+    if efforts:
+        if not isinstance(efforts, list) or len(efforts) > 9:
+            raise ValueError("efforts 必须是最多9项的列表")
+        out = []
+        for effort in efforts:
+            if effort not in ("default", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
+                raise ValueError("不支持的思考档位")
+            item = copy.deepcopy(ep)
+            item.pop("efforts")
+            item["effort"] = None if effort == "default" else effort
+            out.extend(endpoint_targets(name + "@" + effort, item, models))
+        return out
     base_url = str(ep.get("base_url") or ep.get("url") or "")
     api_key = str(ep.get("api_key") or ep.get("key") or "")
     provider = str(ep.get("provider") or detect_provider(base_url, api_key)).lower()
+    if provider == "auto":
+        provider = detect_provider(base_url, api_key)
     if provider not in PROVIDERS:
         raise ValueError(f"端点 {name} 的 provider 非法: {provider}（可选 {', '.join(PROVIDERS)}）")
     model_list = models or _split_models(ep.get("models") or ep.get("model"))
     if not model_list:
         raise ValueError(f"端点 {name} 未配置 models")
-    prices = ep.get("price") or {}
+    prices = {**(ep.get("price_defaults") or {}), **(ep.get("price") or {})}
     out = []
     for m in model_list:
         p = prices.get(m) if isinstance(prices, dict) else None
         pin = pout = None
+        cache_read = cache_write = None
         if isinstance(p, (list, tuple)) and len(p) >= 2:
             pin, pout = float(p[0]), float(p[1])
         elif isinstance(p, dict):
             pin, pout = p.get("input"), p.get("output")
+            cache_read, cache_write = p.get("cache_read"), p.get("cache_write")
         out.append(
             Target(
                 name=name,
@@ -136,6 +157,11 @@ def endpoint_targets(name: str, ep: Dict[str, Any], models: Optional[List[str]] 
                 extra_body=dict(ep.get("extra_body") or {}),
                 price_in=pin,
                 price_out=pout,
+                currency=str(ep.get("currency") or "USD").upper(),
+                effort=ep.get("effort"),
+                price_cache_read=cache_read,
+                price_cache_write=cache_write,
+                price_multiplier=ep.get("price_multiplier", 1),
             )
         )
     return out

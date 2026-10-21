@@ -1,5 +1,7 @@
 <div align="center">
 
+Local enhancements: see [hourly sampling, budgets and security changes](LOCAL_CHANGES.md).
+
 <img src="apitest/static/favicon.svg" width="72" alt="apitest">
 
 # apitest

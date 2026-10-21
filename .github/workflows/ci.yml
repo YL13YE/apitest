@@ -18,6 +18,12 @@ jobs:
         run: uv sync --python ${{ matrix.python-version }}
       - name: Import check
         run: uv run python -c "import apitest.cli, apitest.web, apitest.runner"
+      - name: Security, accounting and sampling regressions
+        run: uv run python -m unittest discover -s tests -v
+      - name: Model recommendation regressions
+        run: node tests/test_model_picks.cjs
+      - name: Monitoring round timing regressions
+        run: node tests/test_round_timing.cjs
       - name: Smoke test against mock server
         run: |
           uv run python tests/mock_server.py 8765 &

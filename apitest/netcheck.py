@@ -70,7 +70,7 @@ def ping_once(target: Target, timeout: float = 10.0, proxy: Optional[str] = None
 
 
 def _http_only(target: Target, url: str, r: PingResult, timeout: float, proxy: Optional[str], verify: bool) -> PingResult:
-    kwargs = dict(timeout=timeout, verify=verify, follow_redirects=True)
+    kwargs = dict(timeout=timeout, verify=verify, follow_redirects=False, trust_env=False)
     if proxy:
         kwargs["proxy"] = proxy
     try:

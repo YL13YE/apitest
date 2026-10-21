@@ -1,5 +1,7 @@
 <div align="center">
 
+本地增强版：先阅读 [小时采样、预算与安全修复说明](LOCAL_CHANGES.md)。
+
 <img src="apitest/static/favicon.svg" width="72" alt="apitest">
 
 # apitest

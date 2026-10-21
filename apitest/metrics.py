@@ -5,8 +5,12 @@ import math
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Sequence
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .runner import RequestResult
+from .measurements import normalize_result
+import copy
 
 SPARK = "▁▂▃▄▅▆▇█"
 
@@ -52,6 +56,7 @@ class Stats:
     mean: float = 0.0
     p50: float = 0.0
     p90: float = 0.0
+    p95: float = 0.0
     p99: float = 0.0
     max: float = 0.0
     std: float = 0.0
@@ -66,6 +71,7 @@ class Stats:
             mean=mean(values),
             p50=percentile(values, 50),
             p90=percentile(values, 90),
+            p95=percentile(values, 95),
             p99=percentile(values, 99),
             max=max(values),
             std=stdev(values),
@@ -82,6 +88,7 @@ class Summary:
     target: str
     model: str
     provider: str
+    currency: str = "USD"
     n: int = 0
     ok: int = 0
     fail: int = 0
@@ -101,6 +108,7 @@ class Summary:
     tokens_source: str = "usage"  # usage / estimated / mixed
     text_chars_mean: float = 0.0
     truncated: int = 0  # 因 max_tokens 被截断的次数
+    output_limit_exceeded: int = 0
     stop_reasons: Dict[str, int] = field(default_factory=dict)
     text_hashes: int = 0  # 输出文本去重后的种类数（=1 说明每次输出完全一致）
     baseline: bool = False
@@ -111,6 +119,9 @@ class Summary:
     ttft_series: List[float] = field(default_factory=list)
     tps_series: List[float] = field(default_factory=list)
     stream: bool = True
+    stall_count: int = 0
+    cost_uncertain: int = 0
+    budget_charge: float = 0.0
 
     @property
     def label(self) -> str:
@@ -121,14 +132,14 @@ class Summary:
         for k in ("ttfb", "ttft", "ttft_text", "total", "tps", "out_tokens", "max_gap"):
             d[k] = {kk: round(vv, 4) if isinstance(vv, float) else vv for kk, vv in d[k].items()}
         d["ttft_series"] = [round(x, 4) for x in self.ttft_series]
-        d["tps_series"] = [round(x, 2) for x in self.tps_series]
+        d["tps_series"] = [round(x, 2) if x is not None else None for x in self.tps_series]
         return d
 
     @classmethod
     def from_dict(cls, d: Dict) -> "Summary":
         s = cls(target=d["target"], model=d["model"], provider=d.get("provider", ""))
         for k in ("n", "ok", "fail", "success_rate", "in_tokens_mean", "reasoning_tokens_mean", "tokens_estimated", "cost_total", "retried", "errors", "ttft_series", "tps_series", "stream",
-                  "tokens_source", "text_chars_mean", "truncated", "stop_reasons", "text_hashes", "baseline", "ttft_vs_base", "total_vs_base", "tps_vs_base"):
+                  "tokens_source", "text_chars_mean", "truncated", "output_limit_exceeded", "stop_reasons", "text_hashes", "baseline", "ttft_vs_base", "total_vs_base", "tps_vs_base", "stall_count", "cost_uncertain", "budget_charge", "currency"):
             if k in d:
                 setattr(s, k, d[k])
         for k in ("ttfb", "ttft", "ttft_text", "total", "tps", "out_tokens", "max_gap"):
@@ -154,13 +165,14 @@ def summarize(results: List[RequestResult]) -> List[Summary]:
         rs = groups[key]
         oks = [r for r in rs if r.ok]
         s = Summary(target=rs[0].target, model=rs[0].model, provider=rs[0].provider, stream=rs[0].stream)
+        s.currency = rs[0].currency
         s.n, s.ok, s.fail = len(rs), len(oks), len(rs) - len(oks)
         s.success_rate = s.ok / s.n if s.n else 0.0
         s.ttfb = Stats.of([r.ttfb for r in oks if r.ttfb > 0])
         s.ttft = Stats.of([r.ttft for r in oks if r.ttft > 0])
         s.ttft_text = Stats.of([r.ttft_text for r in oks if r.ttft_text > 0])
         s.total = Stats.of([r.total for r in oks])
-        s.tps = Stats.of([r.tps for r in oks if r.tps > 0])
+        s.tps = Stats.of([r.tps for r in oks if r.tps_eligible and r.tps > 0])
         s.out_tokens = Stats.of([float(r.output_tokens) for r in oks])
         s.in_tokens_mean = mean([r.input_tokens for r in oks])
         s.reasoning_tokens_mean = mean([r.reasoning_tokens for r in oks])
@@ -170,16 +182,34 @@ def summarize(results: List[RequestResult]) -> List[Summary]:
         s.tokens_source = "usage" if est == 0 else ("estimated" if est == len(oks) else "mixed")
         s.text_chars_mean = mean([r.text_chars for r in oks])
         s.truncated = sum(1 for r in oks if r.truncated)
+        s.output_limit_exceeded = sum(bool(r.to_dict()["output_limit_exceeded"]) for r in rs)
         s.stop_reasons = dict(Counter(r.stop_reason or "?" for r in oks))
         s.text_hashes = len({r.text_hash for r in oks if r.text_hash})
-        costs = [r.cost for r in oks if r.cost is not None]
+        costs = [r.cost for r in rs if r.cost is not None]
         s.cost_total = sum(costs) if costs else None
+        s.stall_count = sum(r.to_dict()["stall_count"] for r in rs)
+        s.cost_uncertain = sum(r.cost_uncertain for r in rs)
+        s.budget_charge = sum(r.budget_charge for r in rs)
         s.retried = sum(1 for r in rs if r.attempt > 1)
         s.errors = dict(Counter(_short_err(r.error) for r in rs if not r.ok))
         s.ttft_series = [r.ttft for r in rs]
-        s.tps_series = [r.tps for r in rs]
+        s.tps_series = [r.tps if r.tps_eligible else None for r in rs]
         out.append(s)
     return out
+
+
+def normalize_saved_run(run):
+    """Recalculate exported speed statistics without changing the stored audit record."""
+    clean = copy.deepcopy(run)
+    if "results" in clean:
+        clean["results"] = [normalize_result(row, clean.get("meta")) for row in clean.get("results") or []]
+    for summary in clean.get("summaries") or []:
+        rows = [r for r in clean.get("results") or [] if not r.get("warmup") and r.get("target") == summary.get("target") and r.get("model") == summary.get("model")]
+        stats = Stats.of([r["tps"] for r in rows if r.get("tps_eligible") and r.get("tps") is not None and r["tps"] > 0])
+        summary["tps"] = asdict(stats)
+        summary["tps_series"] = [r.get("tps") for r in rows]
+        summary["output_limit_exceeded"] = sum(bool(r["output_limit_exceeded"]) for r in rows)
+    return clean
 
 
 def apply_baseline(summaries: List[Summary], baseline_label: Optional[str]) -> Optional[Summary]:
@@ -219,8 +249,8 @@ def comparability_notes(summaries: List[Summary]) -> List[str]:
     est = [s.label for s in valid if s.tokens_source != "usage"]
     if est:
         notes.append("以下目标的 token 数为估算（接口未返回 usage），吞吐不参与排名：" + "、".join(est))
-    if valid and min(s.ok for s in valid) < 5:
-        notes.append("样本少于 5 次，均值差异可能只是波动，请看 ± 与 P90")
+    if valid and min(s.ok for s in valid) < 20:
+        notes.append("样本较少，请看中位数和逐次明细；P95/P99 不适合作为小样本选型依据")
     return notes
 
 
@@ -231,17 +261,37 @@ def _short_err(msg: str, n: int = 80) -> str:
 
 def rank(summaries: List[Summary]) -> Dict[str, Optional[Summary]]:
     """给出各维度冠军。"""
-    valid = [s for s in summaries if s.ok > 0]
+    valid = [s for s in summaries if s.ok >= 3 and s.success_rate >= .9]
     res: Dict[str, Optional[Summary]] = {"ttft": None, "tps": None, "total": None, "stable": None, "reliable": None}
     if not valid:
         return res
-    with_ttft = [s for s in valid if s.ttft.n > 0]
+    with_ttft = [s for s in valid if s.ttft_text.n > 0]
     if with_ttft:
-        res["ttft"] = min(with_ttft, key=lambda s: s.ttft.mean)
-        res["stable"] = min(with_ttft, key=lambda s: s.ttft.cv)
+        res["ttft"] = min(with_ttft, key=lambda s: s.ttft_text.p50)
+        res["stable"] = min(with_ttft, key=lambda s: (s.max_gap.p50, s.ttft_text.cv))
     with_tps = [s for s in valid if s.tps.n > 0 and s.tokens_source == "usage"]
     if with_tps:
         res["tps"] = max(with_tps, key=lambda s: s.tps.mean)
     res["total"] = min(valid, key=lambda s: s.total.mean)
     res["reliable"] = max(valid, key=lambda s: (s.success_rate, -s.total.mean))
     return res
+
+
+def hourly_rows(results):
+    """Beijing-hour buckets; P95 is deliberately hidden below 100 usable samples."""
+    groups = {}
+    for item in results:
+        r = item.to_dict() if hasattr(item, "to_dict") else normalize_result(item)
+        if not r.get("started_at"):
+            continue
+        hour = datetime.fromtimestamp(r["started_at"], ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:00")
+        key = (hour, r.get("target", ""), r.get("model", ""))
+        groups.setdefault(key, []).append(r)
+    rows = []
+    for (hour, target, model), rs in sorted(groups.items()):
+        oks = [r for r in rs if r.get("ok")]
+        ttft = [r["ttft_text"] for r in oks if not r.get("warmup") and r.get("ttft_text", 0) > 0]
+        tps = [r["tps"] for r in oks if not r.get("warmup") and r.get("tps_eligible") and r.get("tps", 0) > 0]
+        unpriced = any(r.get("cost_unknown_reason") == "price_missing" or (r.get("cost_uncertain") and r.get("cost") is None and not r.get("budget_charge")) for r in rs)
+        rows.append({"hour": hour, "timezone": "Asia/Shanghai", "target": target, "model": model, "n": len(rs), "ok": len(oks), "success_rate": len(oks) / len(rs), "ttft_text_p50": percentile(ttft, 50) if ttft else None, "ttft_text_p95": percentile(ttft, 95) if len(ttft) >= 100 else None, "tps_p50": percentile(tps, 50) if tps else None, "max_gap": max((r.get("max_gap", 0) for r in rs), default=0), "stall_count": sum(r.get("stall_count", 0) for r in rs), "accounted_cost": None if unpriced else sum(r.get("budget_charge", 0) for r in rs), "uncertain_attempts": sum(bool(r.get("cost_uncertain")) for r in rs), "small_sample": len(ttft) < 20})
+    return rows

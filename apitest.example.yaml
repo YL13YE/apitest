@@ -1,0 +1,28 @@
+# Copy to apitest.yaml, replace URL/model, then set RELAY_API_KEY in your shell.
+# Price unit: your currency / million tokens. Null prices deliberately prevent
+# monetary-budget runs until real relay prices have been entered.
+defaults:
+  prompt_preset: medium
+  max_tokens: 1024
+  concurrency: 1
+  timeout: 120
+  warmup: 0
+  retries: 0
+  cache_mode: cold
+  sample_minutes: 5
+  max_requests: 48
+
+endpoints:
+  relay:
+    provider: openai  # responses / anthropic / gemini also supported
+    base_url: https://api.example.com/v1
+    api_key: ${RELAY_API_KEY}
+    models: [replace-with-model-id]
+    currency: CNY
+    price_multiplier: 1  # 按所填单价乘以倍率计算；已是折后价请保持1
+    # Only include levels actually supported by this exact model and relay.
+    efforts: [default, low]
+    price:
+      replace-with-model-id:
+        input: null
+        output: null
