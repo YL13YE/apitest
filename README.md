@@ -1,154 +1,248 @@
 <div align="center">
 
-Local enhancements: see [hourly sampling, budgets and security changes](LOCAL_CHANGES.md).
-
 <img src="apitest/static/favicon.svg" width="72" alt="apitest">
 
 # apitest
 
-**Latency & throughput benchmark for AI APIs** — TTFT, tokens/s, stability and gateway overhead, for any OpenAI-compatible / Anthropic / Gemini endpoint
+**Benchmark and monitor API relays to find responsive models and fluent output.**
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![CI](https://github.com/liningbest/apitest/actions/workflows/ci.yml/badge.svg)](https://github.com/liningbest/apitest/actions)
+[![CI](https://github.com/YL13YE/apitest/actions/workflows/ci.yml/badge.svg)](https://github.com/YL13YE/apitest/actions)
 
-[简体中文](README.zh-CN.md)
+[简体中文](README.zh-CN.md) · [Quick start](#quick-start) · [Monitoring](#monitoring) · [Pricing and costs](#pricing-and-costs) · [Metrics](#metrics)
 
 </div>
 
----
+A fork of [liningbest/apitest](https://github.com/liningbest/apitest) for comparing model speed and reasoning efforts during the hours that matter. It retains the original multi-provider benchmarks, history exports and network diagnostics, and adds scheduled sampling, spending controls, billing multipliers and a model dashboard. It measures response speed and fluency, rather than answer quality or model identity.
 
-How much latency does a relay add over calling the provider directly? Which gateway has the faster first token, and which one degrades at night? `apitest` turns "it feels slow" into a reproducible report: it sends real streaming requests to any OpenAI-compatible, Anthropic or Gemini endpoint, measures **TTFT, throughput, total time, success rate and stalls**, aggregates over multiple rounds with percentiles and variance, ranks the targets, and keeps every run in a local history.
+## Changes from upstream
 
-<p align="center"><img src="docs/screenshots/run.png" width="880" alt="Live run view"></p>
+| Area | Changes in this fork |
+|---|---|
+| Model dashboard | Recommendations, speed charts, model cards, hourly observations and assessment criteria; cards show the latest test time in Beijing time |
+| Reasoning efforts | Multi-select buttons for `low / medium / high / xhigh`; each model and effort is measured separately; unspecified efforts remain visible without an effort label |
+| Monitoring | Sample every 60 minutes by default, observe for 1–7 days and select active hours to exclude off-peak periods |
+| Temporary tests | One monitor and one temporary benchmark can run together, with separate results, budgets and stop controls |
+| Cost controls | Import model prices, account for cache usage, apply endpoint billing multipliers and enforce total or hourly budgets; history preserves cost estimates and uncertain reservations |
+| Measurement validity | Separate reasoning from visible output latency and usage; exclude single-chunk responses and unreliable short output windows from speed comparisons |
+| Access and credentials | Authentication for remote access, masked credentials, same-origin and mutation-token checks, private file permissions and destination-bound credentials |
+| Frontend assets | Chart.js is bundled locally; chart scripts do not require a third-party CDN |
 
-## Features
-
-- **One methodology across providers** — OpenAI-compatible (incl. relays such as one-api / new-api, OpenRouter, DeepSeek), Anthropic Messages, Google Gemini; streaming and non-streaming.
-- **Accurate metrics** — TTFB, TTFT, first *visible text* token, total time, output tok/s, longest stream stall, reasoning tokens, stop reason (truncated by `max_tokens` or not). Throughput uses the time after the first text token, so gateways that do or don't forward thinking deltas are comparable.
-- **Statistics, not single samples** — mean / P50 / P90 / P99 / min / max / std / CV; automatic warnings when the comparison is not trustworthy (too few samples, output length mismatch, estimated tokens).
-- **Experiment design built in** — targets are interleaved round-robin by default to cancel time drift; mark a direct-to-provider target as *baseline* and get each gateway's overhead; estimated-token targets are excluded from throughput ranking.
-- **Load modes** — rounds, concurrency, duration-based soak, warmup, retries, interval; Ctrl+C keeps what has completed.
-- **Local web UI** — endpoint management (fetch model list, test connection, one-click quick test), live curves and streaming output, ranking, sortable summary, per-request details, history with comparison and trend charts, connectivity diagnostics, light/dark theme.
-- **Keep records** — history includes per-request details; export JSON / CSV / Markdown; `--json` for scripting.
-- **Connectivity diagnostics** — DNS / TCP / TLS / HTTP phase timing with its own history, to separate network from model latency.
-- **Web UI in English, 简体中文 and 繁體中文** — picked automatically from the browser language, switchable in the top bar.
-
-## Install
-
-Python 3.9+. With [uv](https://github.com/astral-sh/uv):
-
-```bash
-git clone https://github.com/liningbest/apitest.git
-cd apitest
-uv sync
-uv run apitest --help
-```
-
-or `pip install -e .`. Below, `apitest` stands for `uv run apitest`.
+See [the detailed enhancement notes](LOCAL_CHANGES.md) for implementation behavior, assessment rules and fixes. These notes are in Chinese.
 
 ## Quick start
 
+Requires Python 3.9+. Using [uv](https://github.com/astral-sh/uv):
+
 ```bash
-# one endpoint, no config
-apitest run --url https://api.openai.com/v1 --key sk-xxx -m gpt-4o-mini -n 5
-
-# several models on one endpoint
-apitest run --url https://api.example.com/v1 --key sk-xxx -m gpt-4o-mini,deepseek-chat -n 5 --sort tps
-
-# config file for long-term comparisons
-apitest init          # writes ./apitest.yaml
-apitest run --all
+git clone https://github.com/YL13YE/apitest.git
+cd apitest
+uv sync
+uv run apitest web
 ```
+
+Open `http://127.0.0.1:8787`, add an endpoint, API key and models, then select models on the Run page. Alternatively, install with `python -m pip install -e .` and run `apitest` directly.
+
+Viewing the dashboard does not call models. Benchmarks, warmups, retries and monitoring send requests to the selected provider and may incur charges.
+
+### Supported APIs
+
+| `provider` | API |
+|---|---|
+| `openai` | OpenAI-compatible Chat Completions, including relays and self-hosted services |
+| `responses` | Native OpenAI Responses |
+| `anthropic` | Anthropic Messages |
+| `gemini` | Gemini GenerateContent / StreamGenerateContent |
+
+Automatic detection covers OpenAI-compatible, Anthropic and Gemini APIs. Select Responses explicitly. Both streaming and non-streaming requests are supported, but continuous text throughput requires streaming. Remote API endpoints require HTTPS; local mock endpoints may use HTTP.
+
+### Web pages
+
+| Page | Purpose |
+|---|---|
+| Model dashboard | Recommendations, charts, model and effort cards, hourly observations and assessment criteria; defaults to short output, with other test conditions available individually |
+| Run | Temporary benchmarks, live charts, output, request details and the monitoring panel, which is collapsed by default |
+| Endpoints | API addresses, keys, models, reasoning efforts, billing multipliers and prices; connection checks and model discovery |
+| History | Saved results, costs, request details, trends, comparisons and JSON / CSV / Markdown exports |
+| Models / Diagnostics / Settings | Model discovery, DNS / TCP / TLS / HTTP timing and default settings |
+
+## Monitoring
+
+Expand the monitoring panel on the Run page, choose the observation length, sampling interval, daily active hours and budget, then start monitoring. Defaults are one day, one round every 60 minutes and all daily hours selected.
+
+- Hour buttons represent Beijing time (`Asia/Shanghai`). Deselect hours that do not need testing.
+- Observe for 1–7 days, including inactive hours. The daily schedule repeats; missed rounds are not replayed.
+- No new benchmark, warmup or retry requests start outside active hours. Requests already sent can finish.
+- Web monitoring requires a total or hourly monetary budget and complete prices for all selected models. Its estimated request count describes the plan; it is not a manual request cap.
+- Each task retains the models, efforts, prices, multipliers and request settings selected at startup. Later configuration edits apply to new tasks.
+- Closing the browser leaves monitoring running. Exiting the service does not automatically resume it later; completed requests remain in history.
+
+The panel shows active tasks, progress, the next sample time, costs and expected completion. The live result view measures the current round and freezes that timer while waiting. Temporary benchmarks and monitoring have independent start and stop controls.
+
+## Pricing and costs
+
+All rates use **the configured billing unit per million tokens**. The endpoint billing multiplier defaults to `1` and applies once to input, output, cache reads and cache writes. Set `0.16` to charge 16% of the configured rates. Leave it at `1` when prices already include the discount.
+
+### Per-request calculation
+
+```text
+Cost = (uncached input tokens × input rate
+      + cache read tokens × cache read rate
+      + cache write tokens × cache write rate
+      + total output tokens × output rate)
+      / 1,000,000 × billing multiplier
+```
+
+Total input includes cached tokens; uncached input subtracts cache reads and writes. Total output includes explicitly reported reasoning tokens, which are not added a second time. Missing prices remain unknown; explicitly configured free prices may produce a valid zero cost.
+
+For example, 169 uncached input tokens, 4224 cache read tokens and 31 output tokens, at rates of 4, 0.4 and 20 with a multiplier of 0.16, cost:
+
+```text
+(169 × 4 + 4224 × 0.4 + 31 × 20) / 1,000,000 × 0.16
+= 0.000477696
+```
+
+`currency` labels the billing unit; the tool does not perform currency conversion. If a relay sells one dollar-denominated balance unit for ¥1, an estimate of 0.1 balance units corresponds to ¥0.1 of recharge cost under that rule.
+
+### History, plan estimates and budgets
+
+| Amount | Meaning |
+|---|---|
+| Reported-usage estimate | Completed requests priced using reported token usage and the rates and multiplier selected at task startup |
+| Uncertain reservation | Retained allowance for failed, cancelled or unverifiable requests; it does not prove that the provider charged this amount |
+| Historical total estimate | Reported-usage estimates plus uncertain reservations, including warmups, retries and failures; current prices do not reprice old records |
+| Full monitoring plan estimate | A conservative estimate for the entire observation period, using higher comparable historical input and output counts and the highest input/cache rate, without assuming cache discounts |
+
+The full-plan estimate can be much higher than costs after cache hits, and is shown before applying the budget. Without comparable history it uses request settings. Previewing the plan does not call models. Different request conditions are kept separate; efforts for the same model share higher observed usage as a conservative reference.
+
+A task stops when the total budget cannot reserve another request. An exhausted hourly budget pauses sampling until the next running-hour allowance. Budget hours start at task startup; hourly reports use Beijing clock hours. Estimates use provider-reported usage rather than actual billing records. Extra charges or usage beyond requested limits can change the bill; strict limits also require a provider-side spending cap.
+
+### Configuration and price imports
+
+Use [the example configuration](apitest.example.yaml), or adapt the following. Replace the model, URL and prices with your own values. Reasoning efforts must be supported by the selected model and relay.
 
 ```yaml
 # apitest.yaml
 defaults:
-  rounds: 5
-  max_tokens: 512
+  prompt_preset: short
+  max_tokens: 64
+  concurrency: 1
+  timeout: 120
+
 endpoints:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key: ${OPENAI_API_KEY}
-    models: [gpt-4o-mini, gpt-4o]
-    price: { gpt-4o-mini: [0.15, 0.60] }   # USD per 1M tokens [input, output], optional
-  claude:
-    provider: anthropic
-    base_url: https://api.anthropic.com
-    api_key: ${ANTHROPIC_API_KEY}
-    models: [claude-sonnet-5]
   relay:
-    base_url: https://api.some-relay.com/v1
-    api_key: sk-xxx
-    models: [gpt-4o-mini]
-    headers: { X-Custom: value }
+    provider: openai
+    base_url: https://api.example.com/v1
+    api_key: ${RELAY_API_KEY}
+    models: [your-model-id]
+    efforts: [low, medium, high, xhigh]
+    currency: USD
+    price_multiplier: 0.16
+    price:
+      your-model-id:
+        input: 2
+        output: 10
+        cache_read: 0.2
+        cache_write: 2.5
 ```
 
-Gateway overhead in one command:
+Set `RELAY_API_KEY` in the environment before starting the service. In Bash, read it interactively instead of placing the real key in command arguments:
 
 ```bash
-apitest run -e openai -e relay -m gpt-4o-mini -n 10 --baseline openai/gpt-4o-mini --export compare.md
+read -rs -p 'API Key: ' RELAY_API_KEY
+export RELAY_API_KEY
+printf '\n'
 ```
 
-## Web UI
+Import a pricing JSON with `version: 1` and a `models` array using exact model IDs:
 
 ```bash
-apitest web            # opens http://127.0.0.1:8787
+uv run apitest import-prices pricing.json -e relay --currency USD
 ```
 
-<p align="center"><img src="docs/screenshots/summary.png" width="880" alt="Summary and ranking"></p>
-
-Pages: **Run** (scenario presets, live KPIs, per-target cards, streaming output, TTFT / throughput charts, ranking, sortable summary with Δ vs. last run and baseline deltas, details, export), **Endpoints** (auto-saved to `apitest.yaml`, fetch models, test connection, quick test), **History** (full report of any past run, compare two runs, per-target trend), **Models**, **Diagnostics** (DNS / TCP / TLS / HTTP with history), **Settings**. The server binds to `127.0.0.1` only; keys never leave your machine.
-
-The UI follows your browser language (English / 简体中文 / 繁體中文) and can be switched from the top bar; `?lang=en` in the URL forces a language. Deep links: `#/run?replay=<run id>` replays a past run on the Run page, `#/history?show=<run id>` opens a history record.
+Supported price fields are `inputCostPerMillion`, `outputCostPerMillion`, and optional `cacheReadCostPerMillion` and `cacheCreationCostPerMillion`. Imported rates are endpoint defaults; manual model prices take precedence. Changing the destination, protocol or currency stops applying that catalog.
 
 ## Metrics
 
 | Metric | Meaning |
 |---|---|
-| **TTFB** | Request sent → HTTP headers received (handshake + first byte) |
-| **TTFT** | Request sent → first token (text or reasoning delta) |
-| **TTFT text** | Request sent → first visible text token |
-| **Total** | Request sent → end of stream |
-| **tok/s** | Output tokens ÷ (total − TTFT text) |
-| **±** | Standard deviation; with fewer than 5 samples trust ± and P90, not the mean |
-| **CV** | std / mean, lower is more stable |
-| **Stall** | Longest gap between consecutive stream chunks |
-| **Truncated** | Runs whose stop reason was `length` / `max_tokens` |
-| **est** | Token counts estimated from characters (no `usage` in response); excluded from throughput ranking |
-| **vs baseline** | Delta against the baseline target; positive = slower |
+| TTFB | Request sent to HTTP response headers |
+| TTFT | Request sent to the first text or reasoning chunk |
+| First visible text | Request sent to the first visible text chunk; the dashboard's primary latency metric |
+| Text tok/s | Reported output minus explicitly reported reasoning tokens, divided by the interval between the first and last visible text chunks |
+| Longest stall | Maximum gap between visible text chunks; reasoning heartbeats do not fill those gaps |
+| Completion rate | Non-warmup attempts with visible output and no truncation; retries count as separate attempts |
+| P50 / P90 / P95 | Median and tail latency; dashboard P90 requires 20 usable samples and P95 requires 100 |
 
-## Making comparisons trustworthy
+Single-chunk output, output windows shorter than 50 ms, missing verifiable usage, inseparable reasoning usage, truncation and reported output beyond the requested cap are excluded from text-speed comparisons. Missing measurements appear as a dash rather than zero speed. The 50 ms window is a measurement policy, not a speed ceiling.
 
-1. **Interleave** (default): round 1 hits A, B, C once each, then round 2… `--order sequential` or `--order parallel` when you really want them.
-2. **Baseline**: `--baseline endpoint/model` reports each gateway's TTFT / total-time overhead.
-3. **Fix the request**: same preset, same `max_tokens`, optionally `--temperature 0`. Output length and a text hash are recorded; a >30 % length spread is flagged.
-4. **Look at the distribution**: at least 5 rounds, read P90 / ± / CV; for stability use `--duration 60 -c 4`.
-5. **Diagnose first**: `apitest ping` shows how much of 800 ms is TLS.
+The `short` preset defaults to an output cap of 64 and is useful for first-text latency. Use `medium` / `long` and sufficient output space for sustained throughput. GPT output caps include reasoning tokens and do not limit input tokens. Reported output above the requested cap is flagged and retained for cost estimation.
 
-## Try it without a key
+Recommendations use completion and speed metrics, retaining the fastest effort for each model. Card assessments have different sample, latency and variability requirements; see [the detailed criteria](LOCAL_CHANGES.md#模型表现页面). Prompts, output limits, cache conditions, protocols and efforts are measured separately. A small sample or a single round does not establish long-term reliability.
+
+## Common commands
+
+These examples use a configured `relay` endpoint. Actual benchmarks and monitoring send requests. The example budget is illustrative and uses the endpoint's billing unit.
 
 ```bash
-python tests/mock_server.py 8765 &
-apitest run --url http://127.0.0.1:8765/v1 -m mock-fast,mock-slow -n 3 --no-history
+# Inspect a seven-day, hourly plan without calling models
+uv run apitest run -e relay --hours 168 --sample-minutes 60 --budget 10 --plan
+
+# Remove --plan to start sampling; the web UI also provides daily active hours
+uv run apitest run -e relay --hours 168 --sample-minutes 60 --budget 10
+
+# Temporary benchmark and export
+uv run apitest run -e relay --preset medium --max-tokens 512 -n 3 --export results/compare.json
+uv run apitest history --last 10
+uv run apitest models -e relay
+uv run apitest ping -e relay -n 3
+uv run apitest presets
 ```
 
-## Project layout
+## Remote access
 
-```
-apitest/
-├── providers.py   request builders + SSE parsers for the three API styles
-├── runner.py      async execution: timing, concurrency, interleaving, soak
-├── metrics.py     percentiles, stability, baseline deltas, comparability notes
-├── report.py      terminal tables, JSON / CSV / Markdown export
-├── history.py     run & ping history (JSONL)
-├── netcheck.py    DNS / TCP / TLS / HTTP phase timing
-├── web.py         Starlette backend with SSE
-├── static/        single-file frontend, no build step
-└── cli.py         CLI entry point
-tests/mock_server.py   mock server for all three API styles
+The default listener is `127.0.0.1:8787`. To listen on all interfaces:
+
+```bash
+uv run apitest web --host 0.0.0.0 --port 8787 --no-open
 ```
 
-## License
+Non-loopback listeners require HTTP Basic authentication with username `apitest`. The first launch creates `~/.apitest/web-password`, or you can supply a password of at least 16 characters through `APITEST_WEB_PASSWORD` or `--password-file`. The password file is owner-readable with mode `0600`.
 
-[MIT](LICENSE)
+Use HTTPS for public access, through a reverse proxy or `--ssl-certfile` / `--ssl-keyfile`. A reverse proxy must preserve the Host used by the browser. The full service includes key configuration, task controls and request history; restrict access to trusted administrators.
+
+The server sends API credentials to your selected provider for authentication. Normal configuration reads return masked placeholders to the browser. Configuration and history use private file permissions, authenticated API requests do not automatically follow redirects, and chart scripts are served locally. Keep real configuration, credentials, passwords and raw test history out of Git.
+
+## Data locations
+
+| Item | Location |
+|---|---|
+| Configuration | `--config` → `./apitest.yaml` / `./apitest.yml` → `~/.config/apitest/config.yaml` → `~/.apitest/config.yaml` |
+| Benchmark history | `~/.apitest/history.jsonl`, override with `APITEST_HISTORY` |
+| Diagnostic history | `~/.apitest/ping_history.jsonl`, override with `APITEST_PING_HISTORY` |
+| Web password | `~/.apitest/web-password`, or supply it with the startup option/environment variable |
+
+## Local validation
+
+```bash
+uv run python -m unittest discover -s tests -v
+node tests/test_model_picks.cjs
+node tests/test_round_timing.cjs
+```
+
+Start the mock API server, then run the benchmark in a second terminal. No real key is required:
+
+```bash
+uv run python tests/mock_server.py 8765
+```
+
+```bash
+uv run apitest run --url http://127.0.0.1:8765/v1 --key mock-key -m mock-fast -n 1 --no-history
+```
+
+## Credits and license
+
+Upstream: [liningbest/apitest](https://github.com/liningbest/apitest). This fork builds on commit `dcfcc4b`; thanks to the original author for the benchmark, UI and multi-provider foundations.
+
+[MIT](LICENSE), retaining the original copyright notice.
