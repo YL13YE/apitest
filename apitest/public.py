@@ -16,7 +16,7 @@ from .security import private_write, redact
 STATIC = Path(__file__).parent / "static"
 WINDOWS = (1, 6, 24, 72, 168)
 MARKER = ".apitest-public.json"
-FILES = (MARKER, ".nojekyll", "LICENSE", "index.html", "data.json", "assets/site.css",
+FILES = (MARKER, ".nojekyll", "LICENSE", "index.html", "data.json", "manifest.json", "assets/site.css",
          "assets/overview.js", "assets/public.js", "assets/chart.umd.min.js",
          "assets/Chart.js.LICENSE.md", "assets/favicon.svg")
 ROW_FIELDS = ("model", "index", "attempt", "warmup", "started_at", "ok", "stream",
@@ -144,7 +144,8 @@ def export_site(out, runs, endpoint, models=None, *, title="课题组模型表�
         previous = json.loads((out / "data.json").read_text(encoding="utf-8"))
     data["generated_at"] = previous["generated_at"] if previous and previous.get("content_hash") == digest else int(time.time() if now is None else now)
     data["content_hash"] = digest
-    contents = {MARKER: '{"format":"apitest-public-site-v1"}\n', ".nojekyll": "", "data.json": _json(data) + "\n", **_assets(title)}
+    manifest = {k: data[k] for k in ("format", "content_hash", "generated_at", "last_sample")}
+    contents = {"manifest.json": _json(manifest) + "\n", MARKER: '{"format":"apitest-public-site-v1"}\n', ".nojekyll": "", "data.json": _json(data) + "\n", **_assets(title)}
     changed = []
     for name, content in contents.items():
         destination = out / name

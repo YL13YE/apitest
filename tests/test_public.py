@@ -60,10 +60,12 @@ class PublicExportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first=export_site(directory,fixture(),"private",now=NOW)
             before=(Path(directory)/"data.json").read_bytes()
+            manifest=(Path(directory)/"manifest.json").read_bytes()
             again=export_site(directory,fixture(),"private",now=NOW+1)
             self.assertTrue(first["changed_files"])
             self.assertEqual(again["changed_files"],[])
             self.assertEqual((Path(directory)/"data.json").read_bytes(),before)
+            self.assertEqual((Path(directory)/"manifest.json").read_bytes(),manifest)
 
     def test_expired_samples_update_the_time_windows(self):
         with tempfile.TemporaryDirectory() as directory:

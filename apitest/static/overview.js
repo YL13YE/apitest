@@ -104,7 +104,7 @@
     };
     $('ov-auto').onchange=()=>{
       clearInterval(state.timer);state.timer=null;
-      if($('ov-auto').checked)state.timer=setInterval(()=>{if(location.hash.startsWith('#/overview'))fetchData();},30000);
+      if($('ov-auto').checked)state.timer=setInterval(()=>{if(location.hash.startsWith('#/overview'))fetchData();},window.APITEST_PUBLIC?60000:30000);
     };
     new MutationObserver(()=>{if(state.data && location.hash.startsWith('#/overview'))drawChart(filtered());}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
   }

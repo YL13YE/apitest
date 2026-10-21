@@ -13,7 +13,12 @@
   }
   async function load() {
     if(loaded&&Date.now()-loadedAt<1500)return loaded;
-    if(!pending)pending=fetch('./data.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('暂时无法获取测试数据');return r.json();}).then(data=>{
+    if(!pending)pending=fetch('./manifest.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('暂时无法获取更新信息');return r.json();}).then(async manifest=>{
+      if(loaded&&loaded.content_hash===manifest.content_hash)return loaded;
+      const response=await fetch('./data.json?v='+encodeURIComponent(manifest.content_hash),{cache:'no-cache'});
+      if(!response.ok)throw Error('暂时无法获取测试数据');
+      return response.json();
+    }).then(data=>{
       if(data.format!=='apitest-public-v1')throw Error('展示数据格式不匹配');
       loaded=data;loadedAt=Date.now();freshness();return data;
     }).finally(()=>{pending=null;});
