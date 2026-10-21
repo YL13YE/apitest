@@ -15,7 +15,7 @@ uv run apitest export-site --endpoint relay --out ../api-status
 uv run python -m http.server 8801 --bind 127.0.0.1 --directory ../api-status
 ```
 
-打开 `http://127.0.0.1:8801`。可使用 `--models model-a,model-b` 限定公开模型，`--history /path/to/history.jsonl` 指定历史文件，`--title "课题组模型表现"` 设置标题。
+打开 `http://127.0.0.1:8801`。可使用 `--models model-a,model-b` 限定公开模型，`--history /path/to/history.jsonl` 指定历史文件，`--title "中转站模型表现"` 设置标题。
 
 首次输出必须使用空目录，或仅包含 `.git` 的新展示仓库；后续只更新本工具管理的展示文件，拒绝符号链接。`data.json` 不变时保留原生成时间，因此重复导出不会仅因时钟变化产生提交。新请求、窗口内样本过期或展示资源变化会产生更新。
 

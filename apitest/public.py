@@ -85,7 +85,7 @@ def _project(view):
             "variants": variants}
 
 
-def public_data(runs, endpoint, models=None, *, title="课题组模型表现", now=None):
+def public_data(runs, endpoint, models=None, *, title="中转站模型表现", now=None):
     now = time.time() if now is None else now
     scoped = _scoped_runs(runs, endpoint, models)
     windows = {str(hours): {profile: _project(build_overview(scoped, hours=hours, profile=profile, cohort="all", now=now))
@@ -111,7 +111,7 @@ def _assets(title):
 <meta name="description" content="中转站模型响应速度与输出流畅度实测"><title>''' + html.escape(title) + '''</title>
 <link rel="icon" href="./assets/favicon.svg"><link rel="stylesheet" href="./assets/site.css">
 <script defer src="./assets/chart.umd.min.js"></script><script defer src="./assets/public.js"></script><script defer src="./assets/overview.js"></script></head>
-<body><header class="top"><div class="top-in"><a class="brand" href="#/overview">模型测速</a><div class="public-top"><span id="public-freshness">读取测试数据…</span><button class="btn btn-sm" id="public-theme">深色</button></div></div></header>
+<body><header class="top"><div class="top-in"><a class="brand" href="#/overview">apitest</a><div class="public-top"><span id="public-freshness">读取测试数据…</span><button class="btn btn-sm" id="public-theme">深色</button></div></div></header>
 <main>''' + section + '''<footer class="muted" style="margin-top:24px;font-size:11px">本中转站的实测数据 · 时间均为北京时间 · 查看页面不会发起模型请求</footer></main></body></html>'''
     css += "\n.public-top{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:11px;color:var(--text-2)}@media(max-width:600px){.top-in{height:auto;min-height:46px;flex-wrap:wrap;padding-top:8px;padding-bottom:8px}.public-top{flex-wrap:wrap;gap:8px}.ov-main-filters{width:100%}}\n"
     assets = {"LICENSE": (STATIC / "APITest.LICENSE.txt").read_text(encoding="utf-8"), "index.html": doc, "assets/site.css": css, "assets/public.js": (STATIC / "public.js").read_text(encoding="utf-8")}
@@ -120,7 +120,7 @@ def _assets(title):
     return assets
 
 
-def export_site(out, runs, endpoint, models=None, *, title="课题组模型表现", now=None):
+def export_site(out, runs, endpoint, models=None, *, title="中转站模型表现", now=None):
     out = Path(out).absolute()
     if not title.strip() or len(title) > 100:
         raise ValueError("展示标题需要1至100个字符")

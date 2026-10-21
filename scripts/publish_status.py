@@ -69,7 +69,7 @@ def main():
     parser.add_argument("--endpoint",required=True)
     parser.add_argument("--history")
     parser.add_argument("--models")
-    parser.add_argument("--title",default="课题组模型表现")
+    parser.add_argument("--title",default="中转站模型表现")
     parser.add_argument("--interval",type=int,default=600,help="检查间隔秒数，默认600；不调用模型")
     parser.add_argument("--once",action="store_true")
     args=parser.parse_args()

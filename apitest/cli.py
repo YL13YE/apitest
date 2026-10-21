@@ -168,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_site.add_argument("--endpoint", required=True, help="仅导出此端点的历史数据")
     export_site.add_argument("--out", required=True, help="空目录或已管理的展示仓库目录")
     export_site.add_argument("--models", help="可选：允许公开的模型 ID，逗号分隔")
-    export_site.add_argument("--title", default="课题组模型表现")
+    export_site.add_argument("--title", default="中转站模型表现")
     export_site.add_argument("--history", help="历史 JSONL 路径；默认使用 APITEST_HISTORY 或本机历史")
 
     # web
